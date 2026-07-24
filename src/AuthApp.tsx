@@ -1,165 +1,146 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, Eye, EyeOff, LockKeyhole, LogOut, ShieldCheck } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { AlertTriangle, CheckCircle2, Database, Eye, EyeOff, LoaderCircle, LockKeyhole, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import './auth.css'
 
-type AuthUser = { name: string; email: string; role: string }
-type StoredAccount = AuthUser & { salt: string; passwordHash: string }
+type AuthUser = { id: string; name: string; email: string; role: string; workspaceId: string; workspaceName: string; accessRole: string }
+type Store = { projects: unknown[]; items: unknown[]; invoices: unknown[]; activities: unknown[] }
+type Screen = 'loading' | 'database' | 'setup' | 'login' | 'app' | 'error'
+type SyncState = 'synced' | 'saving' | 'error'
 
 type AuthAppProps = { children: ReactNode }
 
-const ACCOUNT_KEY = 'closeflow-account-v1'
-const SESSION_KEY = 'closeflow-session-v1'
+const DATA_KEY = 'closeflow-v1'
+const emptyStore: Store = { projects: [], items: [], invoices: [], activities: [] }
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'CF'
 
-const readJSON = <T,>(key: string, storage: Storage = localStorage): T | null => {
+const readLocalStore = (): Store | null => {
   try {
-    return JSON.parse(storage.getItem(key) || 'null') as T | null
+    const value = JSON.parse(localStorage.getItem(DATA_KEY) || 'null')
+    return value && Array.isArray(value.projects) && Array.isArray(value.items) && Array.isArray(value.invoices) && Array.isArray(value.activities) ? value : null
   } catch {
     return null
   }
 }
 
-const toBase64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''))
-const fromBase64 = (value: string) => Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
-const makeSalt = () => toBase64(crypto.getRandomValues(new Uint8Array(16)))
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'CF'
-
-const derivePassword = async (password: string, salt: string) => {
-  const material = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  )
-  const saltBytes = fromBase64(salt)
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      hash: 'SHA-256',
-      salt: saltBytes.buffer as ArrayBuffer,
-      iterations: 120_000,
-    },
-    material,
-    256,
-  )
-  return toBase64(new Uint8Array(bits))
+const api = async (path: string, init?: RequestInit) => {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw Object.assign(new Error(payload.error || 'Request failed'), { status: response.status, code: payload.code })
+  return payload
 }
 
 export default function AuthApp({ children }: AuthAppProps) {
-  const [account, setAccount] = useState<StoredAccount | null>(() => readJSON<StoredAccount>(ACCOUNT_KEY))
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    if (!readJSON<StoredAccount>(ACCOUNT_KEY)) return null
-    return readJSON<AuthUser>(SESSION_KEY, localStorage) || readJSON<AuthUser>(SESSION_KEY, sessionStorage)
-  })
+  const [screen, setScreen] = useState<Screen>('loading')
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [syncState, setSyncState] = useState<SyncState>('synced')
+  const [message, setMessage] = useState('')
 
-  const saveSession = (nextUser: AuthUser, remember: boolean) => {
-    localStorage.removeItem(SESSION_KEY)
-    sessionStorage.removeItem(SESSION_KEY)
-    const storage = remember ? localStorage : sessionStorage
-    storage.setItem(SESSION_KEY, JSON.stringify(nextUser))
+  const loadWorkspace = useCallback(async (nextUser: AuthUser) => {
+    const remote = await api('/api/workspace') as Store
+    const local = readLocalStore()
+    const remoteIsEmpty = remote.projects.length === 0 && remote.items.length === 0 && remote.invoices.length === 0 && remote.activities.length === 0
+    const localHasData = Boolean(local && (local.projects.length || local.items.length || local.invoices.length || local.activities.length))
+    const workspace = remoteIsEmpty && localHasData ? local! : remote
+    if (remoteIsEmpty && localHasData) await api('/api/workspace', { method: 'PUT', body: JSON.stringify(workspace) })
+    localStorage.setItem(DATA_KEY, JSON.stringify(workspace || emptyStore))
     setUser(nextUser)
-  }
+    setScreen('app')
+  }, [])
 
-  const createAccount = async (profile: AuthUser, password: string, remember: boolean) => {
-    const salt = makeSalt()
-    const nextAccount: StoredAccount = {
-      ...profile,
-      salt,
-      passwordHash: await derivePassword(password, salt),
+  const bootstrap = useCallback(async () => {
+    setScreen('loading')
+    setMessage('')
+    try {
+      const state = await api('/api/auth')
+      if (state.authenticated && state.user) await loadWorkspace(state.user)
+      else setScreen(state.setupRequired ? 'setup' : 'login')
+    } catch (error) {
+      const failure = error as Error & { code?: string }
+      if (failure.code === 'DATABASE_NOT_CONFIGURED') setScreen('database')
+      else { setMessage(failure.message); setScreen('error') }
     }
-    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(nextAccount))
-    setAccount(nextAccount)
-    saveSession(profile, remember)
+  }, [loadWorkspace])
+
+  useEffect(() => { void bootstrap() }, [bootstrap])
+
+  const authenticate = async (action: 'signup' | 'login', values: { name?: string; email: string; role?: string; password: string; remember: boolean }) => {
+    await api('/api/auth', { method: 'POST', body: JSON.stringify({ action, ...values }) })
+    const state = await api('/api/auth')
+    await loadWorkspace(state.user)
   }
 
-  const signIn = async (email: string, password: string, remember: boolean) => {
-    if (!account || account.email.toLowerCase() !== email.trim().toLowerCase()) {
-      return 'The email or password is incorrect.'
-    }
-    const passwordHash = await derivePassword(password, account.salt)
-    if (passwordHash !== account.passwordHash) return 'The email or password is incorrect.'
-    saveSession({ name: account.name, email: account.email, role: account.role }, remember)
-    return null
-  }
-
-  const signOut = () => {
-    localStorage.removeItem(SESSION_KEY)
-    sessionStorage.removeItem(SESSION_KEY)
+  const signOut = async () => {
+    await api('/api/auth', { method: 'POST', body: JSON.stringify({ action: 'logout' }) }).catch(() => null)
     setUser(null)
+    setScreen('login')
   }
 
-  const resetAccount = () => {
-    localStorage.removeItem(ACCOUNT_KEY)
-    localStorage.removeItem(SESSION_KEY)
-    sessionStorage.removeItem(SESSION_KEY)
-    setAccount(null)
-    setUser(null)
-  }
-
-  if (!user) {
-    return <AuthScreen account={account} createAccount={createAccount} signIn={signIn} resetAccount={resetAccount} />
-  }
+  if (screen === 'loading') return <StatusScreen icon={<LoaderCircle className="auth-spin" />} title="Opening CloseFlow" copy="Checking your secure session and loading the shared workspace." />
+  if (screen === 'database') return <DatabaseSetup retry={bootstrap} />
+  if (screen === 'error') return <StatusScreen icon={<AlertTriangle />} title="CloseFlow could not open" copy={message || 'The application could not connect to its backend.'} action={<button className="auth-submit" onClick={bootstrap}><RefreshCw />Try again</button>} />
+  if (screen === 'setup' || screen === 'login') return <AuthScreen setup={screen === 'setup'} submit={authenticate} />
 
   return <>
     {children}
+    <WorkspaceSync onState={setSyncState} />
     <div className="auth-session">
-      <div className="auth-session-avatar">{initials(user.name)}</div>
-      <div className="auth-session-meta"><strong>{user.name}</strong><span>{user.role}</span></div>
+      <div className="auth-session-avatar">{initials(user?.name || '')}</div>
+      <div className="auth-session-meta"><strong>{user?.name}</strong><span>{user?.role}</span></div>
+      <div className={`auth-sync ${syncState}`}><i />{syncState === 'saving' ? 'Saving' : syncState === 'error' ? 'Sync issue' : 'Synced'}</div>
       <button onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
     </div>
   </>
 }
 
-function AuthScreen({ account, createAccount, signIn, resetAccount }: {
-  account: StoredAccount | null
-  createAccount: (profile: AuthUser, password: string, remember: boolean) => Promise<void>
-  signIn: (email: string, password: string, remember: boolean) => Promise<string | null>
-  resetAccount: () => void
+function WorkspaceSync({ onState }: { onState: (state: SyncState) => void }) {
+  const lastSaved = useRef(localStorage.getItem(DATA_KEY) || JSON.stringify(emptyStore))
+  const saving = useRef(false)
+
+  useEffect(() => {
+    const interval = window.setInterval(async () => {
+      const current = localStorage.getItem(DATA_KEY) || JSON.stringify(emptyStore)
+      if (current === lastSaved.current || saving.current) return
+      saving.current = true
+      onState('saving')
+      try {
+        await api('/api/workspace', { method: 'PUT', body: current })
+        lastSaved.current = current
+        onState('synced')
+      } catch {
+        onState('error')
+      } finally {
+        saving.current = false
+      }
+    }, 900)
+    return () => window.clearInterval(interval)
+  }, [onState])
+  return null
+}
+
+function AuthScreen({ setup, submit }: {
+  setup: boolean
+  submit: (action: 'signup' | 'login', values: { name?: string; email: string; role?: string; password: string; remember: boolean }) => Promise<void>
 }) {
-  const setup = !account
-  const [form, setForm] = useState({
-    name: '',
-    email: account?.email || '',
-    role: 'Project Coordinator',
-    password: '',
-    confirm: '',
-    remember: true,
-  })
+  const [form, setForm] = useState({ name: '', email: '', role: 'Project Coordinator', password: '', confirm: '', remember: true })
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const set = (key: keyof typeof form, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }))
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
-    if (setup && form.password.length < 8) {
-      setError('Use at least 8 characters for your password.')
-      return
-    }
-    if (setup && form.password !== form.confirm) {
-      setError('The passwords do not match.')
-      return
-    }
-
+    if (setup && form.password.length < 8) return setError('Use at least 8 characters for your password.')
+    if (setup && form.password !== form.confirm) return setError('The passwords do not match.')
     setSubmitting(true)
     try {
-      if (setup) {
-        await createAccount(
-          {
-            name: form.name.trim(),
-            email: form.email.trim(),
-            role: form.role.trim() || 'Project Coordinator',
-          },
-          form.password,
-          form.remember,
-        )
-      } else {
-        const nextError = await signIn(form.email, form.password, form.remember)
-        if (nextError) setError(nextError)
-      }
-    } catch {
-      setError('CloseFlow could not complete sign-in. Please try again.')
+      await submit(setup ? 'signup' : 'login', form)
+    } catch (failure) {
+      setError((failure as Error).message)
     } finally {
       setSubmitting(false)
     }
@@ -168,34 +149,32 @@ function AuthScreen({ account, createAccount, signIn, resetAccount }: {
   return <main className="auth-shell">
     <section className="auth-visual">
       <div className="auth-brand"><div className="auth-brand-mark">C</div><div><strong>CloseFlow</strong><span>Project closeout</span></div></div>
-      <div className="auth-message">
-        <span className="auth-kicker">One clear path to closure</span>
-        <h1>Keep every old project moving.</h1>
-        <p>Track invoices, missing documents, owners, due dates, and the next action required to close each project.</p>
-      </div>
-      <div className="auth-security"><ShieldCheck /><div><strong>Private local workspace</strong><span>Your account and project records stay in this browser.</span></div></div>
+      <div className="auth-message"><span className="auth-kicker">One clear path to closure</span><h1>Keep every old project moving.</h1><p>Track invoices, missing documents, owners, due dates, and the next action required to close each project.</p></div>
+      <div className="auth-security"><ShieldCheck /><div><strong>Shared database workspace</strong><span>Accounts and project records are stored securely in Neon Postgres.</span></div></div>
     </section>
     <section className="auth-form-panel">
-      <form className="auth-card" onSubmit={submit}>
+      <form className="auth-card" onSubmit={onSubmit}>
         <div className="auth-icon"><LockKeyhole /></div>
-        <span className="auth-eyebrow">{setup ? 'First-time setup' : 'Welcome back'}</span>
-        <h2>{setup ? 'Create your workspace account' : 'Sign in to CloseFlow'}</h2>
-        <p>{setup ? 'Set up the account that will protect this CloseFlow workspace.' : `Continue to the project closeout workspace for ${account?.email}.`}</p>
-
-        {setup && <div className="auth-field-grid">
-          <label>Full name<input required autoComplete="name" value={form.name} onChange={(event) => set('name', event.target.value)} placeholder="Your full name" /></label>
-          <label>Role<input required value={form.role} onChange={(event) => set('role', event.target.value)} placeholder="Project Coordinator" /></label>
-        </div>}
-
+        <span className="auth-eyebrow">{setup ? 'Workspace setup' : 'Welcome back'}</span>
+        <h2>{setup ? 'Create the administrator account' : 'Sign in to CloseFlow'}</h2>
+        <p>{setup ? 'The first account becomes the owner of the shared CloseFlow workspace.' : 'Continue to your shared project closeout workspace.'}</p>
+        {setup && <div className="auth-field-grid"><label>Full name<input required autoComplete="name" value={form.name} onChange={(event) => set('name', event.target.value)} placeholder="Your full name" /></label><label>Role<input required value={form.role} onChange={(event) => set('role', event.target.value)} /></label></div>}
         <label>Email address<input required type="email" autoComplete="email" value={form.email} onChange={(event) => set('email', event.target.value)} placeholder="name@organization.com" /></label>
-        <label>Password<div className="auth-password-field"><input required type={showPassword ? 'text' : 'password'} autoComplete={setup ? 'new-password' : 'current-password'} value={form.password} onChange={(event) => set('password', event.target.value)} placeholder={setup ? 'At least 8 characters' : 'Enter your password'} /><button type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
+        <label>Password<div className="auth-password-field"><input required type={showPassword ? 'text' : 'password'} autoComplete={setup ? 'new-password' : 'current-password'} value={form.password} onChange={(event) => set('password', event.target.value)} placeholder={setup ? 'At least 8 characters' : 'Enter your password'} /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff /> : <Eye />}</button></div></label>
         {setup && <label>Confirm password<input required type={showPassword ? 'text' : 'password'} autoComplete="new-password" value={form.confirm} onChange={(event) => set('confirm', event.target.value)} placeholder="Enter the password again" /></label>}
         <label className="auth-remember"><input type="checkbox" checked={form.remember} onChange={(event) => set('remember', event.target.checked)} /><span>Keep me signed in on this device</span></label>
         {error && <div className="auth-error" role="alert"><AlertTriangle />{error}</div>}
-        <button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait…' : setup ? 'Create account' : 'Sign in'}</button>
-        {!setup && <button className="auth-reset" type="button" onClick={() => { if (confirm('Reset the local CloseFlow account? Project records will remain in this browser.')) resetAccount() }}>Reset local account</button>}
-        <small className="auth-note">This login protects the current browser workspace. Shared team accounts will require a connected authentication database.</small>
+        <button className="auth-submit" type="submit" disabled={submitting}>{submitting ? 'Please wait…' : setup ? 'Create workspace account' : 'Sign in'}</button>
+        <small className="auth-note">Passwords are hashed server-side and sessions use secure, HTTP-only cookies.</small>
       </form>
     </section>
   </main>
+}
+
+function DatabaseSetup({ retry }: { retry: () => void }) {
+  return <main className="auth-status-shell"><section className="database-card"><div className="auth-icon"><Database /></div><span className="auth-eyebrow">Database connection required</span><h1>Connect Neon to CloseFlow</h1><p>The application code is ready, but Vercel has not provided a Postgres connection string yet.</p><ol><li><b>Open Vercel</b><span>Select the CloseFlow project.</span></li><li><b>Add Neon</b><span>Go to Storage or Marketplace, choose Neon Postgres, and connect it to this project.</span></li><li><b>Redeploy</b><span>Vercel will add <code>POSTGRES_URL</code> automatically. Redeploy the latest commit if it does not start by itself.</span></li></ol><button className="auth-submit" onClick={retry}><RefreshCw />Retry database connection</button><small>Your existing browser data remains untouched and will be imported after the administrator account is created.</small></section></main>
+}
+
+function StatusScreen({ icon, title, copy, action }: { icon: ReactNode; title: string; copy: string; action?: ReactNode }) {
+  return <main className="auth-status-shell"><section className="status-card"><div className="auth-icon">{icon}</div><h1>{title}</h1><p>{copy}</p>{action}<div className="status-trust"><CheckCircle2 />Secure session and database checks enabled</div></section></main>
 }
