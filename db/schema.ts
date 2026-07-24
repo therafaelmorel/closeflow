@@ -72,6 +72,13 @@ export const projectBudgetLines = pgTable('project_budget_lines', {
   notes: text('notes').notNull().default(''),
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.id] })])
 
+export const projectBudgetCategoryFunds = pgTable('project_budget_category_funds', {
+  workspaceId: text('workspace_id').notNull(),
+  projectId: text('project_id').notNull(),
+  categoryCode: text('category_code').notNull(),
+  funded: doublePrecision('funded').notNull().default(0),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.projectId, table.categoryCode] })])
+
 export const closeoutItems = pgTable('closeout_items', {
   workspaceId: text('workspace_id').notNull(),
   id: text('id').notNull(),
