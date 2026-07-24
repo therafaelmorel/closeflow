@@ -1,23 +1,34 @@
 # CloseFlow
 
-CloseFlow is a lightweight project closeout tracker for aging construction and facilities projects. It helps teams identify what is keeping a project open, assign the next action, track invoices and closeout documents, and verify that everything is resolved before final closure.
+CloseFlow is a focused project closeout tracker for aging construction and facilities projects. It tracks outstanding invoices, missing documents, responsible parties, due dates, follow-ups, financial status, and the final steps required to close each project.
 
-## Included in the first release
+## Stack
 
-- Dashboard with closeout KPIs and an attention queue
-- Project list with search and status filtering
-- Project detail view with progress, financial summary, outstanding items, invoices, and activity history
-- Outstanding-item tracking with responsibility, amount, priority, due date, and status
-- Invoice workflow from requested through paid
-- Follow-up queue for overdue and aging items
-- Basic operational reports
-- Browser-based local persistence
-- Responsive layout for desktop and mobile
+- React, TypeScript, and Vite
+- Vercel static hosting and Node.js API functions
+- Neon Postgres
+- Drizzle ORM
+- Server-side password hashing and HTTP-only session cookies
 
-## Run locally
+## Connect the database on Vercel
+
+1. Open the **CloseFlow** project in Vercel.
+2. Open **Storage** or **Marketplace** and add **Neon Postgres**.
+3. Connect the Neon resource to the CloseFlow project.
+4. Confirm that Vercel added `POSTGRES_URL` to Production, Preview, and Development.
+5. Redeploy the latest commit.
+
+CloseFlow creates the required tables automatically on the first API request. The matching Drizzle schema and SQL migration are also included in `db/schema.ts` and `drizzle/0000_closeflow.sql`.
+
+## Existing browser data
+
+After the first database administrator account is created, CloseFlow checks the current browser for the previous `localStorage` workspace. When the database workspace is empty, those projects, closeout items, invoices, and activities are imported automatically.
+
+## Local development
 
 ```bash
 npm install
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -27,6 +38,17 @@ Create a production build:
 npm run build
 ```
 
-## Data storage
+Generate or push Drizzle migrations when working manually:
 
-This MVP stores data in the browser using `localStorage`, so it works immediately without database configuration. A future production version can replace the storage adapter with Supabase, PostgreSQL, or another backend without changing the core UI model.
+```bash
+npm run db:generate
+npm run db:push
+```
+
+## Security model
+
+- Passwords are hashed server-side with Node.js `scrypt` and a unique salt.
+- Login sessions use random opaque tokens stored as SHA-256 hashes in Postgres.
+- The browser receives an HTTP-only, SameSite cookie; JavaScript cannot read it.
+- Only the first account can self-register. It becomes the workspace owner.
+- Database credentials remain server-side in Vercel environment variables.
