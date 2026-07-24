@@ -58,6 +58,20 @@ export const projects = pgTable('projects', {
   updated: timestamp('updated', { withTimezone: true, mode: 'string' }).notNull(),
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.id] })])
 
+export const projectBudgetLines = pgTable('project_budget_lines', {
+  workspaceId: text('workspace_id').notNull(),
+  id: text('id').notNull(),
+  projectId: text('project_id').notNull(),
+  categoryCode: text('category_code').notNull(),
+  description: text('description').notNull(),
+  vendor: text('vendor').notNull().default(''),
+  reference: text('reference').notNull().default(''),
+  budget: doublePrecision('budget').notNull().default(0),
+  committed: doublePrecision('committed').notNull().default(0),
+  spent: doublePrecision('spent').notNull().default(0),
+  notes: text('notes').notNull().default(''),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.id] })])
+
 export const closeoutItems = pgTable('closeout_items', {
   workspaceId: text('workspace_id').notNull(),
   id: text('id').notNull(),
