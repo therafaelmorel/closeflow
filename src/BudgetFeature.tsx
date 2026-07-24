@@ -1,5 +1,5 @@
 import { createRoot, type Root } from 'react-dom/client'
-import BudgetSheet, { type BudgetLine } from './BudgetSheet'
+import BudgetSheet, { type BudgetCategoryFunding, type BudgetLine } from './BudgetSheet'
 
 type Project = { id: string; name: string; number: string; budget: number; committed: number; [key: string]: unknown }
 type WorkspaceStore = {
@@ -8,6 +8,7 @@ type WorkspaceStore = {
   invoices: unknown[]
   activities: unknown[]
   budgetLines?: BudgetLine[]
+  budgetCategoryFunds?: BudgetCategoryFunding[]
 }
 
 const DATA_KEY = 'closeflow-v1'
@@ -28,11 +29,18 @@ const writeWorkspace = (workspace: WorkspaceStore) => {
   localStorage.setItem(DATA_KEY, JSON.stringify(workspace))
 }
 
+const updateCommittedTotal = (workspace: WorkspaceStore, projectId: string) => {
+  const projectLines = (workspace.budgetLines || []).filter(item => item.projectId === projectId)
+  const committed = projectLines.reduce((total, item) => total + Number(item.committed || 0), 0)
+  workspace.projects = workspace.projects.map(item => item.id === projectId ? { ...item, committed, updated: new Date().toISOString() } : item)
+}
+
 function BudgetProjectMount({ projectId }: { projectId: string }) {
   const workspace = readWorkspace()
   const project = workspace?.projects.find(item => item.id === projectId)
   if (!workspace || !project) return null
   const lines = (workspace.budgetLines || []).filter(line => line.projectId === projectId)
+  const categoryFunds = (workspace.budgetCategoryFunds || []).filter(item => item.projectId === projectId)
 
   const saveLine = (line: BudgetLine) => {
     const current = readWorkspace()
@@ -40,9 +48,7 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
     const budgetLines = current.budgetLines || []
     const exists = budgetLines.some(item => item.id === line.id)
     current.budgetLines = exists ? budgetLines.map(item => item.id === line.id ? line : item) : [...budgetLines, line]
-    const projectLines = current.budgetLines.filter(item => item.projectId === projectId)
-    const committed = projectLines.reduce((total, item) => total + Number(item.committed || 0), 0)
-    current.projects = current.projects.map(item => item.id === projectId ? { ...item, committed, updated: new Date().toISOString() } : item)
+    updateCommittedTotal(current, projectId)
     writeWorkspace(current)
     renderBudgetFeature(true)
   }
@@ -51,9 +57,19 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
     const current = readWorkspace()
     if (!current) return
     current.budgetLines = (current.budgetLines || []).filter(item => item.id !== id)
-    const projectLines = current.budgetLines.filter(item => item.projectId === projectId)
-    const committed = projectLines.reduce((total, item) => total + Number(item.committed || 0), 0)
-    current.projects = current.projects.map(item => item.id === projectId ? { ...item, committed, updated: new Date().toISOString() } : item)
+    updateCommittedTotal(current, projectId)
+    writeWorkspace(current)
+    renderBudgetFeature(true)
+  }
+
+  const saveCategoryFunding = (funding: BudgetCategoryFunding) => {
+    const current = readWorkspace()
+    if (!current) return
+    const funds = current.budgetCategoryFunds || []
+    const exists = funds.some(item => item.projectId === funding.projectId && item.categoryCode === funding.categoryCode)
+    current.budgetCategoryFunds = exists
+      ? funds.map(item => item.projectId === funding.projectId && item.categoryCode === funding.categoryCode ? funding : item)
+      : [...funds, funding]
     writeWorkspace(current)
     renderBudgetFeature(true)
   }
@@ -66,7 +82,15 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
     renderBudgetFeature(true)
   }
 
-  return <BudgetSheet project={project} lines={lines} onSaveLine={saveLine} onDeleteLine={deleteLine} onUpdateProject={updateProject} />
+  return <BudgetSheet
+    project={project}
+    lines={lines}
+    categoryFunds={categoryFunds}
+    onSaveLine={saveLine}
+    onDeleteLine={deleteLine}
+    onSaveCategoryFunding={saveCategoryFunding}
+    onUpdateProject={updateProject}
+  />
 }
 
 function currentProject(): { project: Project; anchor: Element } | null {
@@ -96,6 +120,7 @@ export function renderBudgetFeature(force = false) {
   const snapshot = JSON.stringify({
     project: workspace?.projects.find(item => item.id === current.project.id),
     budgetLines: (workspace?.budgetLines || []).filter(line => line.projectId === current.project.id),
+    categoryFunds: (workspace?.budgetCategoryFunds || []).filter(item => item.projectId === current.project.id),
   })
   if (!force && activeProjectId === current.project.id && activeSnapshot === snapshot && document.querySelector('.budget-host')) return
 
