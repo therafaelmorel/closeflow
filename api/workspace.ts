@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { eq } from 'drizzle-orm'
-import { activities, closeoutItems, invoices, projectBudgetLines, projects } from '../db/schema.js'
+import { activities, closeoutItems, invoices, projectBudgetCategoryFunds, projectBudgetLines, projects } from '../db/schema.js'
 import { requireSession } from './_lib/auth.js'
 import { ensureSchema, getDb, isDatabaseConfigured } from './_lib/db.js'
 
@@ -11,6 +11,7 @@ type StorePayload = {
   invoices?: Record<string, unknown>[]
   activities?: Record<string, unknown>[]
   budgetLines?: Record<string, unknown>[]
+  budgetCategoryFunds?: Record<string, unknown>[]
 }
 
 const bodyOf = (req: VercelRequest): StorePayload => typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {})
@@ -19,9 +20,10 @@ const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value
 const date = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(text(value)) ? text(value) : new Date().toISOString().slice(0, 10)
 const timestamp = (value: unknown) => Number.isNaN(new Date(text(value)).getTime()) ? new Date().toISOString() : new Date(text(value)).toISOString()
 const id = (value: unknown) => text(value) || randomUUID()
+const categoryCode = (value: unknown) => ['0', '1', '2', '3', '4'].includes(text(value)) ? text(value) : '1'
 
 const validateStore = (store: StorePayload) => {
-  const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines]
+  const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines, store.budgetCategoryFunds]
   return groups.every((group) => group === undefined || (Array.isArray(group) && group.length <= 5000))
 }
 
@@ -36,12 +38,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const workspaceId = session.workspaceId
 
     if (req.method === 'GET') {
-      const [projectRows, itemRows, invoiceRows, activityRows, budgetRows] = await Promise.all([
+      const [projectRows, itemRows, invoiceRows, activityRows, budgetRows, categoryFundRows] = await Promise.all([
         db.select().from(projects).where(eq(projects.workspaceId, workspaceId)),
         db.select().from(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId)),
         db.select().from(invoices).where(eq(invoices.workspaceId, workspaceId)),
         db.select().from(activities).where(eq(activities.workspaceId, workspaceId)),
         db.select().from(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId)),
+        db.select().from(projectBudgetCategoryFunds).where(eq(projectBudgetCategoryFunds.workspaceId, workspaceId)),
       ])
       return res.status(200).json({
         projects: projectRows.map(({ workspaceId: _, ...row }) => row),
@@ -49,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         invoices: invoiceRows.map(({ workspaceId: _, ...row }) => row),
         activities: activityRows.map(({ workspaceId: _, occurredAt, ...row }) => ({ ...row, date: occurredAt })),
         budgetLines: budgetRows.map(({ workspaceId: _, ...row }) => row),
+        budgetCategoryFunds: categoryFundRows.map(({ workspaceId: _, ...row }) => row),
       })
     }
 
@@ -63,6 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await db.delete(activities).where(eq(activities.workspaceId, workspaceId))
     await db.delete(invoices).where(eq(invoices.workspaceId, workspaceId))
     await db.delete(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId))
+    await db.delete(projectBudgetCategoryFunds).where(eq(projectBudgetCategoryFunds.workspaceId, workspaceId))
     await db.delete(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId))
     await db.delete(projects).where(eq(projects.workspaceId, workspaceId))
 
@@ -88,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       workspaceId,
       id: id(row.id),
       projectId: text(row.projectId),
-      categoryCode: ['0', '1', '2', '3', '4'].includes(text(row.categoryCode)) ? text(row.categoryCode) : '1',
+      categoryCode: categoryCode(row.categoryCode),
       description: text(row.description, 'Untitled budget line'),
       vendor: text(row.vendor),
       reference: text(row.reference),
@@ -96,6 +101,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       committed: number(row.committed),
       spent: number(row.spent),
       notes: text(row.notes),
+    }))
+    const categoryFundValues = (store.budgetCategoryFunds || []).map((row) => ({
+      workspaceId,
+      projectId: text(row.projectId),
+      categoryCode: categoryCode(row.categoryCode),
+      funded: Math.max(0, number(row.funded)),
     }))
     const itemValues = (store.items || []).map((row) => ({
       workspaceId,
@@ -136,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (projectValues.length) await db.insert(projects).values(projectValues)
     if (budgetValues.length) await db.insert(projectBudgetLines).values(budgetValues)
+    if (categoryFundValues.length) await db.insert(projectBudgetCategoryFunds).values(categoryFundValues)
     if (itemValues.length) await db.insert(closeoutItems).values(itemValues)
     if (invoiceValues.length) await db.insert(invoices).values(invoiceValues)
     if (activityValues.length) await db.insert(activities).values(activityValues)
