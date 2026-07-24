@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { eq } from 'drizzle-orm'
-import { activities, closeoutItems, invoices, projects } from '../db/schema.js'
+import { activities, closeoutItems, invoices, projectBudgetLines, projects } from '../db/schema.js'
 import { requireSession } from './_lib/auth.js'
 import { ensureSchema, getDb, isDatabaseConfigured } from './_lib/db.js'
 
@@ -10,6 +10,7 @@ type StorePayload = {
   items?: Record<string, unknown>[]
   invoices?: Record<string, unknown>[]
   activities?: Record<string, unknown>[]
+  budgetLines?: Record<string, unknown>[]
 }
 
 const bodyOf = (req: VercelRequest): StorePayload => typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {})
@@ -20,8 +21,8 @@ const timestamp = (value: unknown) => Number.isNaN(new Date(text(value)).getTime
 const id = (value: unknown) => text(value) || randomUUID()
 
 const validateStore = (store: StorePayload) => {
-  const groups = [store.projects, store.items, store.invoices, store.activities]
-  return groups.every((group) => group === undefined || (Array.isArray(group) && group.length <= 2000))
+  const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines]
+  return groups.every((group) => group === undefined || (Array.isArray(group) && group.length <= 5000))
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -35,17 +36,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const workspaceId = session.workspaceId
 
     if (req.method === 'GET') {
-      const [projectRows, itemRows, invoiceRows, activityRows] = await Promise.all([
+      const [projectRows, itemRows, invoiceRows, activityRows, budgetRows] = await Promise.all([
         db.select().from(projects).where(eq(projects.workspaceId, workspaceId)),
         db.select().from(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId)),
         db.select().from(invoices).where(eq(invoices.workspaceId, workspaceId)),
         db.select().from(activities).where(eq(activities.workspaceId, workspaceId)),
+        db.select().from(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId)),
       ])
       return res.status(200).json({
         projects: projectRows.map(({ workspaceId: _, ...row }) => row),
         items: itemRows.map(({ workspaceId: _, ...row }) => row),
         invoices: invoiceRows.map(({ workspaceId: _, ...row }) => row),
         activities: activityRows.map(({ workspaceId: _, occurredAt, ...row }) => ({ ...row, date: occurredAt })),
+        budgetLines: budgetRows.map(({ workspaceId: _, ...row }) => row),
       })
     }
 
@@ -60,6 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await db.delete(activities).where(eq(activities.workspaceId, workspaceId))
     await db.delete(invoices).where(eq(invoices.workspaceId, workspaceId))
     await db.delete(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId))
+    await db.delete(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId))
     await db.delete(projects).where(eq(projects.workspaceId, workspaceId))
 
     const projectValues = (store.projects || []).map((row) => ({
@@ -79,6 +83,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       owner: text(row.owner),
       due: date(row.due),
       updated: timestamp(row.updated),
+    }))
+    const budgetValues = (store.budgetLines || []).map((row) => ({
+      workspaceId,
+      id: id(row.id),
+      projectId: text(row.projectId),
+      categoryCode: ['0', '1', '2', '3', '4'].includes(text(row.categoryCode)) ? text(row.categoryCode) : '1',
+      description: text(row.description, 'Untitled budget line'),
+      vendor: text(row.vendor),
+      reference: text(row.reference),
+      budget: number(row.budget),
+      committed: number(row.committed),
+      spent: number(row.spent),
+      notes: text(row.notes),
     }))
     const itemValues = (store.items || []).map((row) => ({
       workspaceId,
@@ -118,6 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }))
 
     if (projectValues.length) await db.insert(projects).values(projectValues)
+    if (budgetValues.length) await db.insert(projectBudgetLines).values(budgetValues)
     if (itemValues.length) await db.insert(closeoutItems).values(itemValues)
     if (invoiceValues.length) await db.insert(invoices).values(invoiceValues)
     if (activityValues.length) await db.insert(activities).values(activityValues)
