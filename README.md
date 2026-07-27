@@ -20,16 +20,23 @@ CloseFlow is a focused project closeout tracker for aging construction and facil
 
 CloseFlow creates the required tables automatically on the first API request. The matching Drizzle schema and SQL migration are also included in `db/schema.ts` and `drizzle/0000_closeflow.sql`.
 
-## Teams and invitations
+## Accounts, teams, and invitations
 
-CloseFlow ships with no sample data. The workspace starts empty and every record is created by the people using it.
+CloseFlow ships with no sample data. Every record is created by the people using it.
 
-- The first account to sign up becomes the workspace owner.
+### Accounts
+
+- Anyone can create their own account from the sign-in screen. Signing up is never limited to the first person.
+- Each account owns a workspace of its own and is the owner of it.
+- An account can also belong to any number of other workspaces it has been invited into, and switches between them from the panel in the bottom corner. Project records, teams, and people never cross between workspaces.
+
+### Teams
+
 - Owners and managers create teams on the **Teams** page and can assign each project to a team.
 - Anyone who administers a team — an owner, a manager, or that team's lead — invites people by email address.
-- Inviting someone who already has an account adds them to the team immediately. Inviting a new email address creates an invitation link that is copied from the Teams page and sent to that person.
-- Opening the invitation link shows a join screen where the invitee sets their own password. Their workspace access level and team role come from the invitation.
-- Invitations expire after 14 days and can be revoked at any time.
+- Inviting someone who is already in the workspace adds them to the team immediately. Any other address gets an invitation link, copied from the Teams page and sent to that person.
+- Opening the invitation link signs the invitee in and adds the workspace to their account. If they do not have an account yet, they create one on the spot and keep it. Their workspace access level and team role come from the invitation.
+- An invitation can only be accepted by the address it was sent to. Invitations expire after 14 days and can be revoked at any time.
 
 Access levels: **Owner** and **Manager** administer teams and workspace access, **Coordinator** edits project records, and **Viewer** has read-only access.
 
@@ -59,6 +66,7 @@ npm run db:push
 - Passwords are hashed server-side with Node.js `scrypt` and a unique salt.
 - Login sessions use random opaque tokens stored as SHA-256 hashes in Postgres.
 - The browser receives an HTTP-only, SameSite cookie; JavaScript cannot read it.
-- Only the first account can self-register. It becomes the workspace owner.
-- Every later account is created from an invitation, and the invitee chooses their own password.
+- Every account chooses its own password. Signing up gives an account a workspace of its own and nothing else, so a new account can never read an existing workspace.
+- Reaching another workspace requires an invitation, and an invitation can only be redeemed by the email address it was addressed to.
+- Every request is scoped to the workspace the session is currently working in, so switching workspaces changes what the API will read and write.
 - Database credentials remain server-side in Vercel environment variables.

@@ -35,6 +35,8 @@ export const workspaceMembers = pgTable('workspace_members', {
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull(),
+  /** The workspace this browser session is currently looking at. */
+  workspaceId: text('workspace_id').notNull().default(''),
   tokenHash: text('token_hash').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),

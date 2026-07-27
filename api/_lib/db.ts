@@ -29,7 +29,9 @@ async function createSchema() {
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS department text NOT NULL DEFAULT ''`
   await sql`CREATE TABLE IF NOT EXISTS workspaces (id text PRIMARY KEY, name text NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
   await sql`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id text NOT NULL, user_id text NOT NULL, access_role text NOT NULL DEFAULT 'owner', created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (workspace_id, user_id))`
-  await sql`CREATE TABLE IF NOT EXISTS sessions (id text PRIMARY KEY, user_id text NOT NULL, token_hash text NOT NULL UNIQUE, expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
+  await sql`CREATE INDEX IF NOT EXISTS workspace_members_user_idx ON workspace_members(user_id)`
+  await sql`CREATE TABLE IF NOT EXISTS sessions (id text PRIMARY KEY, user_id text NOT NULL, workspace_id text NOT NULL DEFAULT '', token_hash text NOT NULL UNIQUE, expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS workspace_id text NOT NULL DEFAULT ''`
   await sql`CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id)`
   await sql`CREATE TABLE IF NOT EXISTS teams (workspace_id text NOT NULL, id text NOT NULL, name text NOT NULL, description text NOT NULL DEFAULT '', created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (workspace_id, id))`
   await sql`CREATE INDEX IF NOT EXISTS teams_workspace_idx ON teams(workspace_id)`
