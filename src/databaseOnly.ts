@@ -49,37 +49,6 @@ if (typeof window !== 'undefined' && !window.__closeflowDatabaseOnly) {
     if (this === window.localStorage) workspaceMemory = null
     Reflect.apply(nativeClear, this, [])
   }
-
-  const copyReplacements = new Map<string, string>([
-    ['Private local workspace', 'Shared database workspace'],
-    ['Your account and project records stay in this browser.', 'Accounts and project records are stored securely in Neon Postgres.'],
-    ['Manage the local CloseFlow workspace and prepare it for future team integrations.', 'Manage the shared CloseFlow workspace and its database-backed records.'],
-    ['Local data', 'Neon Postgres'],
-    ['This MVP stores project data in this browser, allowing it to work immediately without a database.', 'Projects, invoices, closeout items, and activity are stored in the connected Neon Postgres database.'],
-    ['Team database', 'Database status'],
-    ['Supabase or PostgreSQL can be connected next for secure multi-user access and shared attachments.', 'Neon Postgres is connected through Vercel for secure shared access.'],
-    ['Future release', 'Connected'],
-    ['Your existing browser data remains untouched and will be imported after the administrator account is created.', 'Project and account records are stored through the connected Neon database.'],
-  ])
-
-  const updateVisibleCopy = () => {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
-    let node: Node | null = walker.nextNode()
-    while (node) {
-      const value = node.nodeValue?.trim()
-      if (value && copyReplacements.has(value)) node.nodeValue = copyReplacements.get(value) || value
-      node = walker.nextNode()
-    }
-  }
-
-  const startCopyObserver = () => {
-    updateVisibleCopy()
-    const observer = new MutationObserver(updateVisibleCopy)
-    observer.observe(document.body, { childList: true, subtree: true })
-  }
-
-  if (document.body) startCopyObserver()
-  else window.addEventListener('DOMContentLoaded', startCopyObserver, { once: true })
 }
 
 export {}

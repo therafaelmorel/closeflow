@@ -76,6 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       id: id(row.id),
       name: text(row.name, 'Untitled project'),
       number: text(row.number, 'TBD'),
+      teamId: text(row.teamId),
       department: text(row.department),
       location: text(row.location),
       manager: text(row.manager),
