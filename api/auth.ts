@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { count, eq } from 'drizzle-orm'
-import { users, workspaces, workspaceMembers } from '../db/schema.js'
+import { and, count, eq } from 'drizzle-orm'
+import { teamInvites, teamMembers, teams, users, workspaces, workspaceMembers } from '../db/schema.js'
 import {
   createSession,
   destroySession,
@@ -13,6 +13,14 @@ import {
 import { ensureSchema, getDb, isDatabaseConfigured } from './_lib/db.js'
 
 const bodyOf = (req: VercelRequest) => typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {})
+
+/** Resolves an invitation token that is still pending and unexpired. */
+async function findInvite(token: string) {
+  if (!token) return null
+  const [invite] = await getDb().select().from(teamInvites).where(and(eq(teamInvites.token, token), eq(teamInvites.status, 'pending'))).limit(1)
+  if (!invite || new Date(invite.expiresAt).getTime() < Date.now()) return null
+  return invite
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!isDatabaseConfigured()) {
@@ -81,44 +89,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ user: { id: row.id, name: row.name, email: row.email, role: row.role } })
     }
 
-    if (body.action === 'listUsers') {
-      const session = await getSessionUser(req)
-      if (!session) return res.status(401).json({ error: 'Authentication required', code: 'UNAUTHENTICATED' })
-      if (session.accessRole !== 'owner') return res.status(403).json({ error: 'Only the workspace owner can manage members.' })
-      const members = await db
-        .select({ id: users.id, name: users.name, email: users.email, role: users.role, department: users.department, accessRole: workspaceMembers.accessRole, createdAt: users.createdAt })
-        .from(workspaceMembers)
-        .innerJoin(users, eq(users.id, workspaceMembers.userId))
-        .where(eq(workspaceMembers.workspaceId, session.workspaceId))
-      return res.status(200).json({ members })
+    if (body.action === 'inviteInfo') {
+      const invite = await findInvite(String(body.token || ''))
+      if (!invite) return res.status(404).json({ error: 'This invitation is no longer valid.', code: 'INVITE_INVALID' })
+      const [workspace] = await db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, invite.workspaceId)).limit(1)
+      const [team] = invite.teamId
+        ? await db.select({ name: teams.name }).from(teams).where(and(eq(teams.workspaceId, invite.workspaceId), eq(teams.id, invite.teamId))).limit(1)
+        : [undefined]
+      const [invitedBy] = await db.select({ name: users.name }).from(users).where(eq(users.id, invite.invitedBy)).limit(1)
+      return res.status(200).json({
+        email: invite.email,
+        accessRole: invite.accessRole,
+        workspaceName: workspace?.name || 'CloseFlow',
+        teamName: team?.name || '',
+        invitedBy: invitedBy?.name || '',
+      })
     }
 
-    if (body.action === 'createUser') {
-      const session = await getSessionUser(req)
-      if (!session) return res.status(401).json({ error: 'Authentication required', code: 'UNAUTHENTICATED' })
-      if (session.accessRole !== 'owner') return res.status(403).json({ error: 'Only the workspace owner can add members.' })
+    if (body.action === 'acceptInvite') {
+      const invite = await findInvite(String(body.token || ''))
+      if (!invite) return res.status(404).json({ error: 'This invitation is no longer valid.', code: 'INVITE_INVALID' })
 
       const name = String(body.name || '').trim()
-      const email = normalizeEmail(String(body.email || ''))
       const role = String(body.role || 'Project Coordinator').trim() || 'Project Coordinator'
-      const accessRole = ['manager', 'editor', 'viewer'].includes(String(body.accessRole)) ? String(body.accessRole) : 'viewer'
-      const department = String(body.department || '').trim()
       const password = String(body.password || '')
-      if (!name || !email.includes('@') || password.length < 8) {
-        return res.status(400).json({ error: 'Enter a name, valid email, and password of at least 8 characters.' })
-      }
-      // Managers can span departments (hybrid visibility); coordinators and viewers must be scoped to one.
-      if ((accessRole === 'editor' || accessRole === 'viewer') && !department) {
-        return res.status(400).json({ error: 'Choose a department for coordinator and viewer accounts.' })
-      }
+      const remember = Boolean(body.remember)
+      if (!name || password.length < 8) return res.status(400).json({ error: 'Enter your name and a password of at least 8 characters.' })
 
-      const existing = (await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1))[0]
-      if (existing) return res.status(409).json({ error: 'A user with that email already exists.' })
+      const existing = (await db.select({ id: users.id }).from(users).where(eq(users.email, invite.email)).limit(1))[0]
+      if (existing) return res.status(409).json({ error: 'An account already exists for this email. Sign in instead.' })
 
       const userId = newId()
-      await db.insert(users).values({ id: userId, email, name, role, department, passwordHash: hashPassword(password) })
-      await db.insert(workspaceMembers).values({ workspaceId: session.workspaceId, userId, accessRole })
-      return res.status(201).json({ user: { id: userId, name, email, role, department, accessRole } })
+      await db.insert(users).values({ id: userId, email: invite.email, name, role, passwordHash: hashPassword(password) })
+      await db.insert(workspaceMembers).values({ workspaceId: invite.workspaceId, userId, accessRole: invite.accessRole })
+      if (invite.teamId) await db.insert(teamMembers).values({ workspaceId: invite.workspaceId, teamId: invite.teamId, userId, teamRole: invite.teamRole }).onConflictDoNothing()
+      await db.update(teamInvites).set({ status: 'accepted', acceptedAt: new Date().toISOString() })
+        .where(and(eq(teamInvites.workspaceId, invite.workspaceId), eq(teamInvites.id, invite.id)))
+      await createSession(userId, remember, res)
+      return res.status(201).json({ user: { id: userId, name, email: invite.email, role, accessRole: invite.accessRole } })
     }
 
     return res.status(400).json({ error: 'Unknown authentication action.' })

@@ -40,11 +40,44 @@ export const sessions = pgTable('sessions', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('sessions_token_hash_unique').on(table.tokenHash)])
 
+export const teams = pgTable('teams', {
+  workspaceId: text('workspace_id').notNull(),
+  id: text('id').notNull(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.id] })])
+
+export const teamMembers = pgTable('team_members', {
+  workspaceId: text('workspace_id').notNull(),
+  teamId: text('team_id').notNull(),
+  userId: text('user_id').notNull(),
+  teamRole: text('team_role').notNull().default('member'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.teamId, table.userId] })])
+
+export const teamInvites = pgTable('team_invites', {
+  workspaceId: text('workspace_id').notNull(),
+  id: text('id').notNull(),
+  teamId: text('team_id').notNull().default(''),
+  email: text('email').notNull(),
+  accessRole: text('access_role').notNull().default('editor'),
+  teamRole: text('team_role').notNull().default('member'),
+  token: text('token').notNull(),
+  status: text('status').notNull().default('pending'),
+  invitedBy: text('invited_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true, mode: 'string' }),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.id] }), uniqueIndex('team_invites_token_unique').on(table.token)])
+
 export const projects = pgTable('projects', {
   workspaceId: text('workspace_id').notNull(),
   id: text('id').notNull(),
   name: text('name').notNull(),
   number: text('number').notNull(),
+  teamId: text('team_id').notNull().default(''),
   department: text('department').notNull().default(''),
   location: text('location').notNull().default(''),
   manager: text('manager').notNull().default(''),

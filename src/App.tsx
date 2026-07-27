@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
-  AlertTriangle, ArrowLeft, BarChart3, BellRing, Building2, CheckCircle2, ChevronRight,
-  CircleDollarSign, ClipboardCheck, FileText, FolderKanban, Gauge, LayoutDashboard,
-  Menu, Plus, ReceiptText, RefreshCw, Search, Settings, ShieldCheck, UserPlus, Users, X
+  AlertTriangle, ArrowLeft, BarChart3, BellRing, Check, CheckCircle2, ChevronRight,
+  CircleDollarSign, ClipboardCheck, Copy, Database, FileText, FolderKanban, LayoutDashboard,
+  Mail, Menu, Plus, ReceiptText, Search, Settings, ShieldCheck, Trash2, UserPlus, Users, X
 } from 'lucide-react'
 import { api } from './api'
 import { useAuth, useReadOnly } from './auth-context'
@@ -12,58 +12,37 @@ type ItemStatus = 'Not Started' | 'Follow-Up Needed' | 'Waiting on Vendor' | 'Wa
 type InvoiceStatus = 'Requested' | 'Received' | 'Reviewing' | 'Correction Needed' | 'Approved' | 'Submitted for Payment' | 'Paid'
 
 type Project = {
-  id: string; name: string; number: string; department: string; location: string; manager: string; vendor: string;
+  id: string; name: string; number: string; teamId: string; department: string; location: string; manager: string; vendor: string;
   budget: number; committed: number; target: string; status: ProjectStatus; nextAction: string; owner: string; due: string; updated: string
 }
 type Item = { id: string; projectId: string; title: string; type: string; responsible: string; owner: string; amount: number; due: string; priority: 'High'|'Medium'|'Low'; status: ItemStatus; notes: string; followUp: string }
 type Invoice = { id: string; projectId: string; vendor: string; number: string; amount: number; po: string; due: string; status: InvoiceStatus; disputed: number; hold: string }
 type Activity = { id: string; projectId: string; action: string; detail: string; date: string }
 type Store = { projects: Project[]; items: Item[]; invoices: Invoice[]; activities: Activity[] }
-type View = 'manager'|'dashboard'|'projects'|'items'|'invoices'|'followups'|'reports'|'settings'
+type View = 'dashboard'|'projects'|'items'|'invoices'|'followups'|'reports'|'teams'|'settings'
+
+type TeamMember = { teamId: string; userId: string; teamRole: string; name: string; email: string; role: string; accessRole: string }
+type TeamInvite = { id: string; email: string; accessRole: string; teamRole?: string; token: string; expiresAt: string }
+type Team = { id: string; name: string; description: string; createdAt: string; manageable: boolean; members: TeamMember[]; invites: TeamInvite[] }
+type Person = { id: string; name: string; email: string; role: string; accessRole: string }
+type TeamsPayload = { teams: Team[]; people: Person[]; workspaceInvites: TeamInvite[]; canCreateTeams: boolean }
 
 const today = new Date()
 const date = (offset: number) => { const d = new Date(today); d.setDate(d.getDate()+offset); return d.toISOString().slice(0,10) }
-const timestamp = (offset: number) => { const d = new Date(today); d.setDate(d.getDate()+offset); return d.toISOString() }
 const money = (n:number) => new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n)
 const prettyDate = (s:string) => s ? new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric'}).format(new Date(`${s}T12:00:00`)) : '—'
 const uid = () => crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)
 const overdue = (s:string) => Boolean(s && s < date(0))
 
-const seed: Store = {
-  projects: [
-    {id:'p1',name:'OR 20 Renovation',number:'21-184',department:'Perioperative Services',location:'Main Hospital – Level 4',manager:'Rafael Morel',vendor:'ABC Construction',budget:1284550,committed:1269750,target:date(14),status:'Waiting on Vendor',nextAction:'Request revised final invoice and signed lien waiver',owner:'Rafael Morel',due:date(2),updated:timestamp(-2)},
-    {id:'p2',name:'Imaging Suite Upgrade',number:'22-041',department:'Radiology',location:'Milstein – Level 2',manager:'Rafael Morel',vendor:'Northline Builders',budget:742000,committed:739200,target:date(5),status:'Needs Attention',nextAction:'Reconcile open purchase order balance with Finance',owner:'Rafael Morel',due:date(-1),updated:timestamp(-9)},
-    {id:'p3',name:'North Lobby Refresh',number:'20-318',department:'Facilities',location:'North Building – Lobby',manager:'Dana Kim',vendor:'Urban Field Group',budget:315000,committed:315000,target:date(7),status:'Financial Review',nextAction:'Confirm retainage release approval',owner:'Finance Team',due:date(1),updated:timestamp(-1)},
-    {id:'p4',name:'Pharmacy Clean Room',number:'23-095',department:'Pharmacy',location:'Annex – Level 6',manager:'Rafael Morel',vendor:'MedBuild Partners',budget:968000,committed:956500,target:date(0),status:'Ready to Close',nextAction:'Complete final closeout verification',owner:'Rafael Morel',due:date(0),updated:timestamp(0)},
-    {id:'p5',name:'Ambulatory Clinic Fit-Out',number:'19-222',department:'Ambulatory Care',location:'West Campus – Floor 3',manager:'Luis Ortega',vendor:'Civic Interiors',budget:1120000,committed:1118400,target:date(30),status:'Waiting on Internal Team',nextAction:'Obtain final department acceptance form',owner:'Clinical Operations',due:date(4),updated:timestamp(-4)},
-  ],
-  items: [
-    {id:'i1',projectId:'p1',title:'Final contractor invoice',type:'Final Invoice',responsible:'ABC Construction',owner:'Rafael Morel',amount:28500,due:date(2),priority:'High',status:'Waiting on Vendor',notes:'Invoice must reflect approved change-order credits.',followUp:date(-2)},
-    {id:'i2',projectId:'p1',title:'Signed final lien waiver',type:'Lien Waiver',responsible:'ABC Construction',owner:'Rafael Morel',amount:0,due:date(2),priority:'High',status:'Waiting on Vendor',notes:'Required before final verification.',followUp:date(-2)},
-    {id:'i3',projectId:'p1',title:'Change-order reconciliation',type:'Change Order',responsible:'Finance Team',owner:'Rafael Morel',amount:14350,due:date(5),priority:'Medium',status:'Under Review',notes:'Confirm approved changes match final commitment.',followUp:date(-1)},
-    {id:'i4',projectId:'p2',title:'Open PO balance reconciliation',type:'Purchase Order',responsible:'Finance Team',owner:'Rafael Morel',amount:22750,due:date(-1),priority:'High',status:'Follow-Up Needed',notes:'PO balance does not match current committed amount.',followUp:date(-9)},
-    {id:'i5',projectId:'p2',title:'Vendor credit memo',type:'Credit / Refund',responsible:'Northline Builders',owner:'Rafael Morel',amount:6800,due:date(1),priority:'High',status:'Correction Required',notes:'Credit memo has an incorrect project number.',followUp:date(-4)},
-    {id:'i6',projectId:'p3',title:'Retainage release',type:'Retainage',responsible:'Finance Team',owner:'Dana Kim',amount:15750,due:date(1),priority:'Medium',status:'Under Review',notes:'Awaiting final Finance approval.',followUp:date(0)},
-    {id:'i7',projectId:'p4',title:'Warranty package',type:'Warranty Document',responsible:'MedBuild Partners',owner:'Rafael Morel',amount:0,due:date(-2),priority:'Low',status:'Resolved',notes:'Uploaded to project record.',followUp:date(-2)},
-    {id:'i8',projectId:'p5',title:'Department acceptance form',type:'Final Approval',responsible:'Clinical Operations',owner:'Luis Ortega',amount:0,due:date(4),priority:'Medium',status:'Waiting on Internal Team',notes:'Final signature required from department leadership.',followUp:date(-4)},
-  ],
-  invoices: [
-    {id:'v1',projectId:'p1',vendor:'ABC Construction',number:'Pending',amount:28500,po:'PO-44810',due:date(2),status:'Requested',disputed:0,hold:''},
-    {id:'v2',projectId:'p2',vendor:'Northline Builders',number:'NB-24019',amount:54200,po:'PO-46122',due:date(1),status:'Correction Needed',disputed:6800,hold:'Incorrect project number on credit memo'},
-    {id:'v3',projectId:'p3',vendor:'Urban Field Group',number:'UFG-9914',amount:15750,po:'PO-42988',due:date(1),status:'Approved',disputed:0,hold:''},
-    {id:'v4',projectId:'p4',vendor:'MedBuild Partners',number:'MB-3115',amount:37800,po:'PO-47131',due:date(-10),status:'Paid',disputed:0,hold:''},
-  ],
-  activities: [
-    {id:'a1',projectId:'p1',action:'Follow-up sent',detail:'Requested revised final invoice and signed lien waiver.',date:timestamp(-2)},
-    {id:'a2',projectId:'p1',action:'Item updated',detail:'Change-order reconciliation moved to Under Review.',date:timestamp(-1)},
-    {id:'a3',projectId:'p2',action:'Invoice received',detail:'Invoice NB-24019 received and flagged for correction.',date:timestamp(-8)},
-    {id:'a4',projectId:'p3',action:'Approval recorded',detail:'Final invoice approved; retainage release remains open.',date:timestamp(-1)},
-  ]
-}
-
 const nav: {id:View;label:string;icon:typeof LayoutDashboard}[] = [
-  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard},{id:'projects',label:'Projects',icon:FolderKanban},{id:'items',label:'Outstanding Items',icon:ClipboardCheck},{id:'invoices',label:'Invoices',icon:ReceiptText},{id:'followups',label:'Follow-Ups',icon:BellRing},{id:'reports',label:'Reports',icon:BarChart3},{id:'settings',label:'Settings',icon:Settings}
+  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard},{id:'projects',label:'Projects',icon:FolderKanban},{id:'items',label:'Outstanding Items',icon:ClipboardCheck},{id:'invoices',label:'Invoices',icon:ReceiptText},{id:'followups',label:'Follow-Ups',icon:BellRing},{id:'reports',label:'Reports',icon:BarChart3},{id:'teams',label:'Teams',icon:Users},{id:'settings',label:'Settings',icon:Settings}
 ]
+const emptyStore: Store = {projects:[],items:[],invoices:[],activities:[]}
+const emptyTeams: TeamsPayload = {teams:[],people:[],workspaceInvites:[],canCreateTeams:false}
+const readStore = ():Store=>{try{const value=JSON.parse(localStorage.getItem('closeflow-v1')||'null');return value&&Array.isArray(value.projects)?value:emptyStore}catch{return emptyStore}}
+const initials = (name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(part=>part[0]?.toUpperCase()).join('')||'CF'
+const accessLabel = (r:string)=>r==='owner'?'Owner':r==='manager'?'Manager':r==='editor'?'Coordinator':'Viewer'
+const accessClass = (r:string)=>r==='owner'?'ready-to-close':r==='manager'?'financial-review':r==='viewer'?'waiting-on-internal-team':'under-review'
 const projectStatuses: ProjectStatus[] = ['Needs Attention','Waiting on Vendor','Waiting on Internal Team','Financial Review','Ready to Close','Closed']
 const itemStatuses: ItemStatus[] = ['Not Started','Follow-Up Needed','Waiting on Vendor','Waiting on Internal Team','Under Review','Correction Required','Resolved']
 const invoiceStatuses: InvoiceStatus[] = ['Requested','Received','Reviewing','Correction Needed','Approved','Submitted for Payment','Paid']
@@ -71,9 +50,9 @@ const cls = (s:string) => `status ${s.toLowerCase().replaceAll(' ','-').replaceA
 
 function App(){
   const auth = useAuth()
-  const canSeePortfolio = auth?.accessRole==='manager'||auth?.accessRole==='owner'
-  const [data,setData] = useState<Store>(()=>{try{return JSON.parse(localStorage.getItem('closeflow-v1')||'null')||seed}catch{return seed}})
-  const [view,setView] = useState<View>(auth?.accessRole==='manager'?'manager':'dashboard')
+  const [data,setData] = useState<Store>(readStore)
+  const [teams,setTeams] = useState<TeamsPayload>(emptyTeams)
+  const [view,setView] = useState<View>('dashboard')
   const [selected,setSelected] = useState<string|null>(null)
   const [query,setQuery] = useState('')
   const [filter,setFilter] = useState('All')
@@ -82,10 +61,16 @@ function App(){
   const readOnly = useReadOnly()
   useEffect(()=>localStorage.setItem('closeflow-v1',JSON.stringify(data)),[data])
 
+  const loadTeams = useCallback(async()=>{try{setTeams(await api('/api/teams') as TeamsPayload)}catch{/* teams stay empty until the request succeeds */}},[])
+  // loadTeams() only calls setState after an awaited fetch, so this is not a synchronous cascade.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{void loadTeams()},[loadTeams])
+
   const openItems = data.items.filter(i=>i.status!=='Resolved')
   const overdueItems = openItems.filter(i=>overdue(i.due))
   const project = data.projects.find(p=>p.id===selected)
   const projectName = (id:string)=>data.projects.find(p=>p.id===id)?.name||'Unknown project'
+  const teamName = (id:string)=>teams.teams.find(t=>t.id===id)?.name||''
   const filteredProjects = data.projects.filter(p=>(filter==='All'||p.status===filter)&&`${p.name} ${p.number} ${p.vendor}`.toLowerCase().includes(query.toLowerCase()))
 
   const updateProject=(id:string,patch:Partial<Project>)=>setData(d=>({...d,projects:d.projects.map(p=>p.id===id?{...p,...patch,updated:new Date().toISOString()}:p)}))
@@ -97,25 +82,25 @@ function App(){
   return <div className="app-shell">
     <aside className={`sidebar ${mobile?'open':''}`}>
       <div className="brand"><div className="brand-mark">C</div><div><strong>CloseFlow</strong><span>Project closeout</span></div><button className="icon mobile-close" onClick={()=>setMobile(false)}><X/></button></div>
-      <nav>{(canSeePortfolio?[{id:'manager' as View,label:'Manager View',icon:Gauge},...nav]:nav).map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id&&!selected?'active':''} onClick={()=>go(n.id)}><Icon/><span>{n.label}</span>{n.id==='followups'&&overdueItems.length>0?<b>{overdueItems.length}</b>:null}</button>})}</nav>
-      <div className="sidebar-foot"><div className="avatar">RM</div><div><strong>Rafael Morel</strong><span>Project Coordinator</span></div></div>
+      <nav>{nav.map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id&&!selected?'active':''} onClick={()=>go(n.id)}><Icon/><span>{n.label}</span>{n.id==='followups'&&overdueItems.length>0?<b>{overdueItems.length}</b>:null}</button>})}</nav>
+      <div className="sidebar-foot"><div className="avatar">{initials(auth?.name||'')}</div><div><strong>{auth?.name||'CloseFlow'}</strong><span>{auth?.role||'Signed in'}</span></div></div>
     </aside>
     {mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close menu"/>}
     <main className="main">
       <header className="topbar"><button className="icon menu" onClick={()=>setMobile(true)}><Menu/></button><div className="global-search"><Search/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search projects, vendors, or numbers"/></div><button className="icon"><BellRing/></button>{!readOnly&&<button className="primary" onClick={()=>setModal('project')}><Plus/>New project</button>}</header>
       <div className="content">
-        {project ? <ProjectDetail project={project} data={data} readOnly={readOnly} updateProject={updateProject} updateItem={updateItem} updateInvoice={updateInvoice} addActivity={addActivity} back={()=>setSelected(null)} addItem={()=>setModal('item')} addInvoice={()=>setModal('invoice')}/> :
-        view==='manager'&&canSeePortfolio?<ManagerDashboard data={data} defaultDept={auth?.department||'All'} openProject={setSelected}/>:
+        {project ? <ProjectDetail project={project} data={data} teamName={teamName(project.teamId)} readOnly={readOnly} updateProject={updateProject} updateItem={updateItem} updateInvoice={updateInvoice} addActivity={addActivity} back={()=>setSelected(null)} addItem={()=>setModal('item')} addInvoice={()=>setModal('invoice')}/> :
         view==='dashboard'?<Dashboard data={data} openProject={setSelected} setView={go}/>:
         view==='projects'?<Projects projects={filteredProjects} filter={filter} setFilter={setFilter} openProject={setSelected} add={()=>setModal('project')} readOnly={readOnly}/>:
         view==='items'?<Items items={data.items} projectName={projectName} update={updateItem} add={()=>setModal('item')} readOnly={readOnly}/>:
         view==='invoices'?<Invoices invoices={data.invoices} projectName={projectName} update={updateInvoice} add={()=>setModal('invoice')} readOnly={readOnly}/>:
         view==='followups'?<FollowUps items={openItems} projects={data.projects} update={updateItem} log={addActivity} readOnly={readOnly}/>:
         view==='reports'?<Reports data={data}/>:
-        <SettingsView readOnly={readOnly} reset={()=>{if(confirm('Reset all CloseFlow data to the sample workspace?'))setData(seed)}}/>}
+        view==='teams'?<TeamsView payload={teams} apply={setTeams} projects={data.projects} openProject={setSelected}/>:
+        <SettingsView/>}
       </div>
     </main>
-    {modal&&<Modal title={modal==='project'?'Add project':modal==='item'?'Add outstanding item':'Add invoice'} close={()=>setModal(null)}><CreateForm kind={modal} projects={data.projects} selected={selected} save={(payload)=>{setData(d=>modal==='project'?{...d,projects:[payload as Project,...d.projects]}:modal==='item'?{...d,items:[payload as Item,...d.items]}:{...d,invoices:[payload as Invoice,...d.invoices]});setModal(null)}}/></Modal>}
+    {modal&&<Modal title={modal==='project'?'Add project':modal==='item'?'Add outstanding item':'Add invoice'} close={()=>setModal(null)}><CreateForm kind={modal} projects={data.projects} teams={teams.teams} selected={selected} defaultOwner={auth?.name||''} save={(payload)=>{setData(d=>modal==='project'?{...d,projects:[payload as Project,...d.projects]}:modal==='item'?{...d,items:[payload as Item,...d.items]}:{...d,invoices:[payload as Invoice,...d.invoices]});setModal(null)}}/></Modal>}
   </div>
 }
 
@@ -127,30 +112,8 @@ function Dashboard({data,openProject,setView}:{data:Store;openProject:(id:string
   const attention=[...open].sort((a,b)=>a.due.localeCompare(b.due)).slice(0,5)
   return <><PageHead eyebrow="Portfolio overview" title="Project closeouts" copy="Keep every outstanding invoice, document, approval, and follow-up moving toward closure." action={<button className="secondary" onClick={()=>setView('followups')}>View follow-ups<ChevronRight/></button>}/>
     <section className="stats-grid"><Stat label="Projects in closeout" value={`${open.length}`} detail={`${data.projects.filter(p=>p.status==='Ready to Close').length} ready to close`} icon={FolderKanban}/><Stat label="Outstanding value" value={money(unpaid.reduce((a,b)=>a+b.amount,0))} detail={`${unpaid.length} invoices not paid`} icon={CircleDollarSign}/><Stat label="Overdue items" value={`${openItems.filter(i=>overdue(i.due)).length}`} detail="Require immediate follow-up" icon={AlertTriangle}/><Stat label="Resolved this workspace" value={`${data.items.filter(i=>i.status==='Resolved').length}`} detail="Closeout items completed" icon={CheckCircle2}/></section>
-    <section className="two-col"><div className="panel"><div className="panel-head"><div><span className="eyebrow">Priority queue</span><h2>What needs attention</h2></div><button className="text-btn" onClick={()=>setView('projects')}>All projects<ChevronRight/></button></div><div className="project-list">{attention.map(p=><button className="project-row" key={p.id} onClick={()=>openProject(p.id)}><div className="project-code">{p.number}</div><div className="grow"><strong>{p.name}</strong><span>{p.nextAction}</span></div><div className="row-meta"><span className={cls(p.status)}>{p.status}</span><small className={overdue(p.due)?'danger-text':''}>{prettyDate(p.due)}</small></div><ChevronRight/></button>)}</div></div>
-    <div className="panel"><div className="panel-head"><div><span className="eyebrow">Workflow health</span><h2>Closeout stages</h2></div></div><div className="stage-list">{projectStatuses.filter(s=>s!=='Closed').map(s=>{const count=data.projects.filter(p=>p.status===s).length;return <div key={s}><div><strong>{s}</strong><span>{count} project{count===1?'':'s'}</span></div><div className="bar"><i style={{width:`${Math.max(6,count/data.projects.length*100)}%`}}/></div></div>})}</div></div></section>
-  </>
-}
-
-function ManagerDashboard({data,defaultDept,openProject}:{data:Store;defaultDept:string;openProject:(id:string)=>void}){
-  const departments=Array.from(new Set(data.projects.map(p=>p.department).filter(Boolean))).sort()
-  const initialDept=defaultDept&&defaultDept!=='All'&&departments.includes(defaultDept)?defaultDept:'All'
-  const [dept,setDept]=useState<string>(initialDept)
-  const inDept=(pid:string)=>dept==='All'||data.projects.find(p=>p.id===pid)?.department===dept
-  const projects=data.projects.filter(p=>dept==='All'||p.department===dept)
-  const items=data.items.filter(i=>inDept(i.projectId))
-  const invoices=data.invoices.filter(i=>inDept(i.projectId))
-  const open=projects.filter(p=>p.status!=='Closed')
-  const openItems=items.filter(i=>i.status!=='Resolved')
-  const overdueItems=openItems.filter(i=>overdue(i.due))
-  const unpaid=invoices.filter(i=>i.status!=='Paid')
-  const attention=[...open].sort((a,b)=>a.due.localeCompare(b.due)).slice(0,6)
-  const parties=Object.entries(openItems.reduce<Record<string,number>>((a,i)=>({...a,[i.responsible||'Unassigned']:(a[i.responsible||'Unassigned']||0)+1}),{})).sort((a,b)=>b[1]-a[1]).slice(0,6)
-  return <><PageHead eyebrow="Portfolio oversight" title="Manager view" copy="A read-focused rollup of closeout health across the department — where work is aging, who is holding it, and what is ready to close." action={<div className="global-search" style={{maxWidth:220}}><Building2 style={{position:'absolute',left:12,top:11,width:16,color:'#999'}}/><select value={dept} onChange={e=>setDept(e.target.value)} style={{width:'100%',border:'1px solid #ddd',borderRadius:9,padding:'10px 12px 10px 36px',background:'#fafafa'}}><option value="All">All departments</option>{departments.map(d=><option key={d} value={d}>{d}</option>)}</select></div>}/>
-    <section className="stats-grid"><Stat label="Projects in closeout" value={`${open.length}`} detail={`${projects.filter(p=>p.status==='Ready to Close').length} ready to close`} icon={FolderKanban}/><Stat label="Overdue items" value={`${overdueItems.length}`} detail={`of ${openItems.length} open items`} icon={AlertTriangle}/><Stat label="Outstanding value" value={money(unpaid.reduce((a,b)=>a+b.amount,0))} detail={`${unpaid.length} invoices not paid`} icon={CircleDollarSign}/><Stat label="Resolved" value={`${items.filter(i=>i.status==='Resolved').length}`} detail="Closeout items completed" icon={CheckCircle2}/></section>
-    <section className="two-col"><div className="panel"><div className="panel-head"><div><span className="eyebrow">Priority queue</span><h2>Needs attention soonest</h2></div></div><div className="project-list">{attention.map(p=><button className="project-row" key={p.id} onClick={()=>openProject(p.id)}><div className="project-code">{p.number}</div><div className="grow"><strong>{p.name}</strong><span>{p.department} · {p.nextAction}</span></div><div className="row-meta"><span className={cls(p.status)}>{p.status}</span><small className={overdue(p.due)?'danger-text':''}>{prettyDate(p.due)}</small></div><ChevronRight/></button>)}{!attention.length&&<Empty text="No open projects in this view."/>}</div></div>
-    <div className="panel"><div className="panel-head"><div><span className="eyebrow">Workflow health</span><h2>Closeout stages</h2></div></div><div className="stage-list">{projectStatuses.filter(s=>s!=='Closed').map(s=>{const count=projects.filter(p=>p.status===s).length;return <div key={s}><div><strong>{s}</strong><span>{count} project{count===1?'':'s'}</span></div><div className="bar"><i style={{width:`${projects.length?Math.max(4,count/projects.length*100):0}%`}}/></div></div>})}</div></div></section>
-    <section className="report-grid section-gap"><div className="panel span-2"><h2>Financial summary</h2><div className="financial-grid"><div><span>Total budget</span><strong>{money(projects.reduce((a,b)=>a+b.budget,0))}</strong></div><div><span>Committed</span><strong>{money(projects.reduce((a,b)=>a+b.committed,0))}</strong></div><div><span>Unpaid invoices</span><strong>{money(unpaid.reduce((a,b)=>a+b.amount,0))}</strong></div><div><span>Disputed</span><strong>{money(invoices.reduce((a,b)=>a+b.disputed,0))}</strong></div></div></div><div className="panel"><h2>Held by party</h2><div className="rank-list">{parties.map(([name,count],n)=><div key={name}><b>{n+1}</b><span>{name}</span><strong>{count}</strong></div>)}{!parties.length&&<Empty text="Nothing outstanding."/>}</div></div></section>
+    <section className="two-col"><div className="panel"><div className="panel-head"><div><span className="eyebrow">Priority queue</span><h2>What needs attention</h2></div><button className="text-btn" onClick={()=>setView('projects')}>All projects<ChevronRight/></button></div><div className="project-list">{attention.map(p=><button className="project-row" key={p.id} onClick={()=>openProject(p.id)}><div className="project-code">{p.number}</div><div className="grow"><strong>{p.name}</strong><span>{p.nextAction}</span></div><div className="row-meta"><span className={cls(p.status)}>{p.status}</span><small className={overdue(p.due)?'danger-text':''}>{prettyDate(p.due)}</small></div><ChevronRight/></button>)}{!attention.length&&<Empty text="No projects yet. Add your first closeout project to begin."/>}</div></div>
+    <div className="panel"><div className="panel-head"><div><span className="eyebrow">Workflow health</span><h2>Closeout stages</h2></div></div><div className="stage-list">{projectStatuses.filter(s=>s!=='Closed').map(s=>{const count=data.projects.filter(p=>p.status===s).length;return <div key={s}><div><strong>{s}</strong><span>{count} project{count===1?'':'s'}</span></div><div className="bar"><i style={{width:`${data.projects.length?Math.max(6,count/data.projects.length*100):0}%`}}/></div></div>})}</div></div></section>
   </>
 }
 
@@ -162,43 +125,110 @@ function Invoices({invoices,projectName,update,add,readOnly}:{invoices:Invoice[]
 
 function FollowUps({items,projects,update,log,readOnly}:{items:Item[];projects:Project[];update:(id:string,p:Partial<Item>)=>void;log:(pid:string,a:string,d:string)=>void;readOnly:boolean}){const sorted=[...items].sort((a,b)=>a.due.localeCompare(b.due));return <><PageHead eyebrow="Daily action list" title="Follow-ups" copy="Focus on the small number of actions that will move old projects closer to closure."/><div className="follow-grid">{sorted.map(i=>{const p=projects.find(p=>p.id===i.projectId);return <div className={`follow-card ${overdue(i.due)?'late':''}`} key={i.id}><div className="follow-top"><span className={cls(i.status)}>{i.status}</span><span className="priority">{i.priority}</span></div><h3>{i.title}</h3><p>{p?.name} · {p?.number}</p><dl><div><dt>Waiting on</dt><dd>{i.responsible}</dd></div><div><dt>Owner</dt><dd>{i.owner}</dd></div><div><dt>Due</dt><dd className={overdue(i.due)?'danger-text':''}>{prettyDate(i.due)}</dd></div></dl>{!readOnly&&<button className="secondary full" onClick={()=>{update(i.id,{followUp:date(0)});log(i.projectId,'Follow-up logged',`Followed up on ${i.title}.`)}}>Log follow-up</button>}</div>})}</div></>}
 
-function Reports({data}:{data:Store}){const byStatus=projectStatuses.map(status=>({status,count:data.projects.filter(p=>p.status===status).length}));const vendors=Object.entries(data.items.filter(i=>i.status!=='Resolved').reduce<Record<string,number>>((a,i)=>({...a,[i.responsible]:(a[i.responsible]||0)+1}),{})).sort((a,b)=>b[1]-a[1]);return <><PageHead eyebrow="Operational reporting" title="Reports" copy="See where closeout work is aging, which parties are holding items, and how much remains unresolved."/><section className="report-grid"><div className="panel"><h2>Projects by stage</h2><div className="report-bars">{byStatus.map(r=><div key={r.status}><span>{r.status}</span><div className="bar"><i style={{width:`${r.count/data.projects.length*100}%`}}/></div><strong>{r.count}</strong></div>)}</div></div><div className="panel"><h2>Outstanding by party</h2><div className="rank-list">{vendors.map(([name,count],n)=><div key={name}><b>{n+1}</b><span>{name}</span><strong>{count} item{count===1?'':'s'}</strong></div>)}</div></div><div className="panel span-2"><h2>Financial summary</h2><div className="financial-grid"><div><span>Total project budget</span><strong>{money(data.projects.reduce((a,b)=>a+b.budget,0))}</strong></div><div><span>Current commitments</span><strong>{money(data.projects.reduce((a,b)=>a+b.committed,0))}</strong></div><div><span>Unpaid invoices</span><strong>{money(data.invoices.filter(i=>i.status!=='Paid').reduce((a,b)=>a+b.amount,0))}</strong></div><div><span>Disputed amount</span><strong>{money(data.invoices.reduce((a,b)=>a+b.disputed,0))}</strong></div></div></div></section></>}
+function Reports({data}:{data:Store}){const byStatus=projectStatuses.map(status=>({status,count:data.projects.filter(p=>p.status===status).length}));const vendors=Object.entries(data.items.filter(i=>i.status!=='Resolved').reduce<Record<string,number>>((a,i)=>({...a,[i.responsible]:(a[i.responsible]||0)+1}),{})).sort((a,b)=>b[1]-a[1]);return <><PageHead eyebrow="Operational reporting" title="Reports" copy="See where closeout work is aging, which parties are holding items, and how much remains unresolved."/><section className="report-grid"><div className="panel"><h2>Projects by stage</h2><div className="report-bars">{byStatus.map(r=><div key={r.status}><span>{r.status}</span><div className="bar"><i style={{width:`${data.projects.length?r.count/data.projects.length*100:0}%`}}/></div><strong>{r.count}</strong></div>)}</div></div><div className="panel"><h2>Outstanding by party</h2><div className="rank-list">{vendors.map(([name,count],n)=><div key={name}><b>{n+1}</b><span>{name}</span><strong>{count} item{count===1?'':'s'}</strong></div>)}{!vendors.length&&<Empty text="Nothing outstanding."/>}</div></div><div className="panel span-2"><h2>Financial summary</h2><div className="financial-grid"><div><span>Total project budget</span><strong>{money(data.projects.reduce((a,b)=>a+b.budget,0))}</strong></div><div><span>Current commitments</span><strong>{money(data.projects.reduce((a,b)=>a+b.committed,0))}</strong></div><div><span>Unpaid invoices</span><strong>{money(data.invoices.filter(i=>i.status!=='Paid').reduce((a,b)=>a+b.amount,0))}</strong></div><div><span>Disputed amount</span><strong>{money(data.invoices.reduce((a,b)=>a+b.disputed,0))}</strong></div></div></div></section></>}
 
-function ProjectDetail({project,data,readOnly,updateProject,updateItem,updateInvoice,addActivity,back,addItem,addInvoice}:{project:Project;data:Store;readOnly:boolean;updateProject:(id:string,p:Partial<Project>)=>void;updateItem:(id:string,p:Partial<Item>)=>void;updateInvoice:(id:string,p:Partial<Invoice>)=>void;addActivity:(pid:string,a:string,d:string)=>void;back:()=>void;addItem:()=>void;addInvoice:()=>void}){
+function ProjectDetail({project,data,teamName,readOnly,updateProject,updateItem,updateInvoice,addActivity,back,addItem,addInvoice}:{project:Project;data:Store;teamName:string;readOnly:boolean;updateProject:(id:string,p:Partial<Project>)=>void;updateItem:(id:string,p:Partial<Item>)=>void;updateInvoice:(id:string,p:Partial<Invoice>)=>void;addActivity:(pid:string,a:string,d:string)=>void;back:()=>void;addItem:()=>void;addInvoice:()=>void}){
   const items=data.items.filter(i=>i.projectId===project.id), invoices=data.invoices.filter(i=>i.projectId===project.id), activities=data.activities.filter(a=>a.projectId===project.id).sort((a,b)=>b.date.localeCompare(a.date)); const resolved=items.filter(i=>i.status==='Resolved').length; const progress=items.length?Math.round(resolved/items.length*100):100
   return <><button className="back" onClick={back}><ArrowLeft/>Back to projects</button><div className="project-hero"><div><span className="eyebrow">Project {project.number}</span><h1>{project.name}</h1><p>{project.location} · {project.department}</p></div><div className="hero-actions">{readOnly?<span className={cls(project.status)}>{project.status}</span>:<><select value={project.status} onChange={e=>updateProject(project.id,{status:e.target.value as ProjectStatus})}>{projectStatuses.map(s=><option key={s}>{s}</option>)}</select><button className="secondary" onClick={()=>{addActivity(project.id,'Follow-up logged',project.nextAction);updateProject(project.id,{updated:new Date().toISOString()})}}>Log follow-up</button></>}</div></div>
   <div className="progress-panel"><div><strong>{progress}% complete</strong><span>{resolved} of {items.length} requirements resolved</span></div><div className="progress"><i style={{width:`${progress}%`}}/></div></div>
   <section className="detail-grid"><div className="panel span-2"><div className="panel-head"><div><span className="eyebrow">Primary action</span><h2>What happens next</h2></div></div><div className="next-action"><div className="next-num">01</div><div><strong>{project.nextAction}</strong><span>Owner: {project.owner} · Due {prettyDate(project.due)}</span></div>{!readOnly&&<button className="primary" onClick={()=>{addActivity(project.id,'Action completed',project.nextAction);updateProject(project.id,{status:'Ready to Close',nextAction:'Complete final closeout verification',due:date(1)})}}>Complete action</button>}</div></div>
-  <div className="panel"><h2>Project information</h2><dl className="info-list"><div><dt>Project manager</dt><dd>{project.manager}</dd></div><div><dt>Primary vendor</dt><dd>{project.vendor}</dd></div><div><dt>Target closeout</dt><dd>{prettyDate(project.target)}</dd></div><div><dt>Original budget</dt><dd>{money(project.budget)}</dd></div><div><dt>Committed</dt><dd>{money(project.committed)}</dd></div><div><dt>Uncommitted</dt><dd>{money(project.budget-project.committed)}</dd></div></dl></div></section>
+  <div className="panel"><h2>Project information</h2><dl className="info-list"><div><dt>Team</dt><dd>{teamName||'Unassigned'}</dd></div><div><dt>Project manager</dt><dd>{project.manager}</dd></div><div><dt>Primary vendor</dt><dd>{project.vendor}</dd></div><div><dt>Target closeout</dt><dd>{prettyDate(project.target)}</dd></div><div><dt>Original budget</dt><dd>{money(project.budget)}</dd></div><div><dt>Committed</dt><dd>{money(project.committed)}</dd></div><div><dt>Uncommitted</dt><dd>{money(project.budget-project.committed)}</dd></div></dl></div></section>
   <section className="panel section-gap"><div className="panel-head"><div><span className="eyebrow">Requirements</span><h2>Outstanding items</h2></div>{!readOnly&&<button className="secondary" onClick={addItem}><Plus/>Add item</button>}</div><div className="table-wrap"><table><thead><tr><th>Item</th><th>Responsible</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead><tbody>{items.map(i=><tr key={i.id}><td><strong>{i.title}</strong><span>{i.type}</span></td><td>{i.responsible}</td><td>{i.amount?money(i.amount):'—'}</td><td className={overdue(i.due)&&i.status!=='Resolved'?'danger-text':''}>{prettyDate(i.due)}</td><td>{readOnly?<span className={cls(i.status)}>{i.status}</span>:<select value={i.status} onChange={e=>updateItem(i.id,{status:e.target.value as ItemStatus})}>{itemStatuses.map(s=><option key={s}>{s}</option>)}</select>}</td></tr>)}</tbody></table></div></section>
   <section className="detail-grid section-gap"><div className="panel span-2"><div className="panel-head"><div><span className="eyebrow">Financial</span><h2>Invoices</h2></div>{!readOnly&&<button className="secondary" onClick={addInvoice}><Plus/>Add invoice</button>}</div>{invoices.map(i=><div className="invoice-row" key={i.id}><div className="invoice-icon"><FileText/></div><div className="grow"><strong>{i.number}</strong><span>{i.vendor} · {i.po}</span></div><strong>{money(i.amount)}</strong>{readOnly?<span className={cls(i.status)}>{i.status}</span>:<select value={i.status} onChange={e=>updateInvoice(i.id,{status:e.target.value as InvoiceStatus})}>{invoiceStatuses.map(s=><option key={s}>{s}</option>)}</select>}</div>)}{!invoices.length&&<Empty text="No invoices have been added."/>}</div><div className="panel"><h2>Activity</h2><div className="activity-list">{activities.map(a=><div key={a.id}><i/><div><strong>{a.action}</strong><p>{a.detail}</p><span>{new Date(a.date).toLocaleDateString()}</span></div></div>)}{!activities.length&&<Empty text="No activity recorded."/>}</div></div></section></>
 }
 
 function Modal({title,close,children}:{title:string;close:()=>void;children:React.ReactNode}){return <div className="modal-wrap"><button className="modal-scrim" onClick={close}/><div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon" onClick={close}><X/></button></div>{children}</div></div>}
-function CreateForm({kind,projects,selected,save}:{kind:'project'|'item'|'invoice';projects:Project[];selected:string|null;save:(v:Project|Item|Invoice)=>void}){const [form,setForm]=useState<Record<string,string>>({projectId:selected||projects[0]?.id||'',due:date(7),status:kind==='project'?'Needs Attention':kind==='item'?'Not Started':'Requested'});const set=(k:string,v:string)=>setForm(f=>({...f,[k]:v}));const submit=(e:React.FormEvent)=>{e.preventDefault();if(kind==='project')save({id:uid(),name:form.name||'Untitled project',number:form.number||'TBD',department:form.department||'',location:form.location||'',manager:form.manager||'Rafael Morel',vendor:form.vendor||'',budget:Number(form.budget||0),committed:Number(form.committed||0),target:form.due,status:form.status as ProjectStatus,nextAction:form.nextAction||'Review project closeout requirements',owner:form.owner||'Rafael Morel',due:form.due,updated:new Date().toISOString()});else if(kind==='item')save({id:uid(),projectId:form.projectId,title:form.title||'Untitled item',type:form.type||'Other',responsible:form.responsible||'',owner:form.owner||'Rafael Morel',amount:Number(form.amount||0),due:form.due,priority:(form.priority||'Medium') as Item['priority'],status:form.status as ItemStatus,notes:form.notes||'',followUp:''});else save({id:uid(),projectId:form.projectId,vendor:form.vendor||'',number:form.number||'Pending',amount:Number(form.amount||0),po:form.po||'',due:form.due,status:form.status as InvoiceStatus,disputed:0,hold:''})};return <form className="form" onSubmit={submit}>{kind!=='project'&&<label>Project<select value={form.projectId} onChange={e=>set('projectId',e.target.value)}>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label>}{kind==='project'?<><label>Project name<input required onChange={e=>set('name',e.target.value)}/></label><div className="form-row"><label>Project number<input onChange={e=>set('number',e.target.value)}/></label><label>Department<input onChange={e=>set('department',e.target.value)}/></label></div><label>Location<input onChange={e=>set('location',e.target.value)}/></label><div className="form-row"><label>Project manager<input defaultValue="Rafael Morel" onChange={e=>set('manager',e.target.value)}/></label><label>Vendor<input onChange={e=>set('vendor',e.target.value)}/></label></div><div className="form-row"><label>Budget<input type="number" onChange={e=>set('budget',e.target.value)}/></label><label>Committed<input type="number" onChange={e=>set('committed',e.target.value)}/></label></div><label>Next action<input onChange={e=>set('nextAction',e.target.value)}/></label></>:kind==='item'?<><label>Item title<input required onChange={e=>set('title',e.target.value)}/></label><div className="form-row"><label>Type<select onChange={e=>set('type',e.target.value)}><option>Final Invoice</option><option>Retainage</option><option>Change Order</option><option>Purchase Order</option><option>Credit / Refund</option><option>Lien Waiver</option><option>Permit Closure</option><option>Warranty Document</option><option>Final Approval</option><option>Other</option></select></label><label>Priority<select onChange={e=>set('priority',e.target.value)}><option>Medium</option><option>High</option><option>Low</option></select></label></div><label>Responsible party<input onChange={e=>set('responsible',e.target.value)}/></label><label>Amount<input type="number" onChange={e=>set('amount',e.target.value)}/></label><label>Notes<textarea rows={3} onChange={e=>set('notes',e.target.value)}/></label></>:<><div className="form-row"><label>Vendor<input required onChange={e=>set('vendor',e.target.value)}/></label><label>Invoice number<input onChange={e=>set('number',e.target.value)}/></label></div><div className="form-row"><label>PO number<input onChange={e=>set('po',e.target.value)}/></label><label>Amount<input type="number" onChange={e=>set('amount',e.target.value)}/></label></div></>}<div className="form-row"><label>Due date<input type="date" value={form.due} onChange={e=>set('due',e.target.value)}/></label><label>Status<select value={form.status} onChange={e=>set('status',e.target.value)}>{(kind==='project'?projectStatuses:kind==='item'?itemStatuses:invoiceStatuses).map(s=><option key={s}>{s}</option>)}</select></label></div><button className="primary full" type="submit">Create {kind}</button></form>}
-function SettingsView({readOnly,reset}:{readOnly:boolean;reset:()=>void}){const auth=useAuth();const isOwner=auth?.accessRole==='owner';return <><PageHead eyebrow="Workspace" title="Settings" copy="Manage the local CloseFlow workspace and prepare it for future team integrations."/>{isOwner&&<TeamManagement/>}<div className="settings-card"><div><h2>Local data</h2><p>This MVP stores project data in this browser, allowing it to work immediately without a database.</p></div>{!readOnly&&<button className="secondary" onClick={reset}><RefreshCw/>Reset sample data</button>}</div><div className="settings-card disabled"><div><h2>Team database</h2><p>Supabase or PostgreSQL can be connected next for secure multi-user access and shared attachments.</p></div><span>Future release</span></div></>}
+function CreateForm({kind,projects,teams,selected,defaultOwner,save}:{kind:'project'|'item'|'invoice';projects:Project[];teams:Team[];selected:string|null;defaultOwner:string;save:(v:Project|Item|Invoice)=>void}){const [form,setForm]=useState<Record<string,string>>({projectId:selected||projects[0]?.id||'',due:date(7),status:kind==='project'?'Needs Attention':kind==='item'?'Not Started':'Requested'});const set=(k:string,v:string)=>setForm(f=>({...f,[k]:v}));const submit=(e:React.FormEvent)=>{e.preventDefault();if(kind==='project')save({id:uid(),name:form.name||'Untitled project',number:form.number||'TBD',teamId:form.teamId||'',department:form.department||'',location:form.location||'',manager:form.manager||defaultOwner,vendor:form.vendor||'',budget:Number(form.budget||0),committed:Number(form.committed||0),target:form.due,status:form.status as ProjectStatus,nextAction:form.nextAction||'Review project closeout requirements',owner:form.owner||defaultOwner,due:form.due,updated:new Date().toISOString()});else if(kind==='item')save({id:uid(),projectId:form.projectId,title:form.title||'Untitled item',type:form.type||'Other',responsible:form.responsible||'',owner:form.owner||defaultOwner,amount:Number(form.amount||0),due:form.due,priority:(form.priority||'Medium') as Item['priority'],status:form.status as ItemStatus,notes:form.notes||'',followUp:''});else save({id:uid(),projectId:form.projectId,vendor:form.vendor||'',number:form.number||'Pending',amount:Number(form.amount||0),po:form.po||'',due:form.due,status:form.status as InvoiceStatus,disputed:0,hold:''})};return <form className="form" onSubmit={submit}>{kind!=='project'&&<label>Project<select value={form.projectId} onChange={e=>set('projectId',e.target.value)}>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></label>}{kind==='project'?<><label>Project name<input required onChange={e=>set('name',e.target.value)}/></label><div className="form-row"><label>Project number<input onChange={e=>set('number',e.target.value)}/></label><label>Department<input onChange={e=>set('department',e.target.value)}/></label></div><div className="form-row"><label>Team<select value={form.teamId||''} onChange={e=>set('teamId',e.target.value)}><option value="">Unassigned</option>{teams.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><label>Location<input onChange={e=>set('location',e.target.value)}/></label></div><div className="form-row"><label>Project manager<input defaultValue={defaultOwner} onChange={e=>set('manager',e.target.value)}/></label><label>Vendor<input onChange={e=>set('vendor',e.target.value)}/></label></div><div className="form-row"><label>Budget<input type="number" onChange={e=>set('budget',e.target.value)}/></label><label>Committed<input type="number" onChange={e=>set('committed',e.target.value)}/></label></div><label>Next action<input onChange={e=>set('nextAction',e.target.value)}/></label></>:kind==='item'?<><label>Item title<input required onChange={e=>set('title',e.target.value)}/></label><div className="form-row"><label>Type<select onChange={e=>set('type',e.target.value)}><option>Final Invoice</option><option>Retainage</option><option>Change Order</option><option>Purchase Order</option><option>Credit / Refund</option><option>Lien Waiver</option><option>Permit Closure</option><option>Warranty Document</option><option>Final Approval</option><option>Other</option></select></label><label>Priority<select onChange={e=>set('priority',e.target.value)}><option>Medium</option><option>High</option><option>Low</option></select></label></div><label>Responsible party<input onChange={e=>set('responsible',e.target.value)}/></label><label>Amount<input type="number" onChange={e=>set('amount',e.target.value)}/></label><label>Notes<textarea rows={3} onChange={e=>set('notes',e.target.value)}/></label></>:<><div className="form-row"><label>Vendor<input required onChange={e=>set('vendor',e.target.value)}/></label><label>Invoice number<input onChange={e=>set('number',e.target.value)}/></label></div><div className="form-row"><label>PO number<input onChange={e=>set('po',e.target.value)}/></label><label>Amount<input type="number" onChange={e=>set('amount',e.target.value)}/></label></div></>}<div className="form-row"><label>Due date<input type="date" value={form.due} onChange={e=>set('due',e.target.value)}/></label><label>Status<select value={form.status} onChange={e=>set('status',e.target.value)}>{(kind==='project'?projectStatuses:kind==='item'?itemStatuses:invoiceStatuses).map(s=><option key={s}>{s}</option>)}</select></label></div><button className="primary full" type="submit">Create {kind}</button></form>}
+function SettingsView(){const auth=useAuth();return <><PageHead eyebrow="Workspace" title="Settings" copy="Review how this CloseFlow workspace is configured and where its records are stored."/>
+  <div className="settings-card"><div><h2>Workspace</h2><p>{auth?.workspaceName||'CloseFlow Workspace'} — you are signed in as {auth?.name} ({accessLabel(auth?.accessRole||'viewer')}).</p></div><span>{accessLabel(auth?.accessRole||'viewer')}</span></div>
+  <div className="settings-card"><div><h2>Neon Postgres</h2><p>Projects, closeout items, invoices, budgets, teams, and activity are stored in the connected Neon Postgres database.</p></div><span><Database style={{width:12,verticalAlign:'-2px',marginRight:5}}/>Connected</span></div>
+  <div className="settings-card"><div><h2>People and teams</h2><p>Workspace access is managed from the Teams page. Invite people by email and they join with the access level chosen for them.</p></div><span>Teams</span></div></>}
 
-type Member={id:string;name:string;email:string;role:string;department:string;accessRole:string}
-function TeamManagement(){
-  const [members,setMembers]=useState<Member[]>([])
-  const [form,setForm]=useState({name:'',email:'',role:'Project Coordinator',accessRole:'viewer',department:'',password:''})
-  const [error,setError]=useState('')
-  const [busy,setBusy]=useState(false)
-  const [open,setOpen]=useState(false)
-  const set=(k:keyof typeof form,v:string)=>setForm(f=>({...f,[k]:v}))
-  const load=async()=>{try{const r=await api('/api/auth',{method:'POST',body:JSON.stringify({action:'listUsers'})});setMembers(r.members||[])}catch{/* owner-only */}}
-  // load() only calls setState after an awaited fetch, so this is not a synchronous cascade.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(()=>{void load()},[])
-  const scoped=form.accessRole==='editor'||form.accessRole==='viewer'
-  const submit=async(e:React.FormEvent)=>{e.preventDefault();setError('');if(form.password.length<8)return setError('Use at least 8 characters for the temporary password.');if(scoped&&!form.department.trim())return setError('Choose a department for coordinator and viewer accounts.');setBusy(true);try{await api('/api/auth',{method:'POST',body:JSON.stringify({action:'createUser',...form})});setForm({name:'',email:'',role:'Project Coordinator',accessRole:'viewer',department:'',password:''});setOpen(false);await load()}catch(err){setError((err as Error).message)}finally{setBusy(false)}}
-  const roleLabel=(r:string)=>r==='owner'?'Owner':r==='manager'?'Manager':r==='editor'?'Coordinator':'Viewer'
-  const roleClass=(r:string)=>r==='owner'?'ready-to-close':r==='manager'?'financial-review':r==='viewer'?'waiting-on-internal-team':''
-  return <div className="panel section-gap" style={{marginBottom:14}}><div className="panel-head"><div><span className="eyebrow"><Users style={{width:13,verticalAlign:'-2px',marginRight:5}}/>Team access</span><h2>Members</h2></div><button className="secondary" onClick={()=>setOpen(o=>!o)}><UserPlus/>Add member</button></div>
-    <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Title</th><th>Department</th><th>Access</th></tr></thead><tbody>{members.map(m=><tr key={m.id}><td><strong>{m.name}</strong></td><td>{m.email}</td><td>{m.role}</td><td>{m.department||<span style={{color:'#999'}}>All</span>}</td><td><span className={`status ${roleClass(m.accessRole)}`}>{m.accessRole==='owner'?<ShieldCheck style={{width:11,verticalAlign:'-1px',marginRight:4}}/>:null}{roleLabel(m.accessRole)}</span></td></tr>)}{!members.length&&<tr><td colSpan={5}><span style={{color:'#999'}}>No members loaded yet.</span></td></tr>}</tbody></table></div>
-    {open&&<form className="form" style={{marginTop:18}} onSubmit={submit}><div className="form-row"><label>Full name<input required value={form.name} onChange={e=>set('name',e.target.value)}/></label><label>Email<input required type="email" value={form.email} onChange={e=>set('email',e.target.value)}/></label></div><div className="form-row"><label>Access level<select value={form.accessRole} onChange={e=>set('accessRole',e.target.value)}><option value="viewer">Viewer — read-only, one department</option><option value="editor">Coordinator — edits one department</option><option value="manager">Manager — sees all, edits own department</option></select></label><label>Department{scoped?' (required)':' (home)'}<input value={form.department} onChange={e=>set('department',e.target.value)} placeholder="e.g. Radiology"/></label></div><div className="form-row"><label>Title<input value={form.role} onChange={e=>set('role',e.target.value)} placeholder="e.g. Manager"/></label><label>Temporary password<input required type="text" value={form.password} onChange={e=>set('password',e.target.value)} placeholder="At least 8 characters"/></label></div>{error&&<div className="auth-error" role="alert"><AlertTriangle/>{error}</div>}<button className="primary full" type="submit" disabled={busy}>{busy?'Adding…':'Create member account'}</button></form>}
+function TeamsView({payload,apply,projects,openProject}:{payload:TeamsPayload;apply:(p:TeamsPayload)=>void;projects:Project[];openProject:(id:string)=>void}){
+  const [error,setError] = useState('')
+  const [busy,setBusy] = useState(false)
+  const [creating,setCreating] = useState(false)
+  const [draft,setDraft] = useState({name:'',description:''})
+  const run = async(body:Record<string,unknown>)=>{
+    setError('');setBusy(true)
+    try{apply(await api('/api/teams',{method:'POST',body:JSON.stringify(body)}) as TeamsPayload);return true}
+    catch(failure){setError((failure as Error).message);return false}
+    finally{setBusy(false)}
+  }
+  const createTeam = async(event:React.FormEvent)=>{
+    event.preventDefault()
+    if(await run({action:'createTeam',...draft})){setDraft({name:'',description:''});setCreating(false)}
+  }
+  const unassigned = projects.filter(p=>!p.teamId||!payload.teams.some(t=>t.id===p.teamId))
+  return <><PageHead eyebrow="Workspace access" title="Teams" copy="Group the people who close projects together, invite new members by email, and give each team the projects it owns." action={payload.canCreateTeams?<button className="primary" onClick={()=>setCreating(value=>!value)}><Plus/>New team</button>:undefined}/>
+    {error&&<div className="auth-error" role="alert"><AlertTriangle/>{error}</div>}
+    {creating&&<div className="panel" style={{marginBottom:14}}><form className="form" onSubmit={createTeam}><div className="form-row"><label>Team name<input required value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} placeholder="e.g. Facilities Closeout"/></label><label>Description<input value={draft.description} onChange={e=>setDraft(d=>({...d,description:e.target.value}))} placeholder="What this team is responsible for"/></label></div><button className="primary full" type="submit" disabled={busy}>{busy?'Creating…':'Create team'}</button></form></div>}
+    <div className="team-grid">{payload.teams.map(team=><TeamCard key={team.id} team={team} people={payload.people} projects={projects.filter(p=>p.teamId===team.id)} canDelete={payload.canCreateTeams} busy={busy} run={run} openProject={openProject}/>)}</div>
+    {!payload.teams.length&&!creating&&<div className="panel"><Empty text={payload.canCreateTeams?'No teams yet. Create the first team to start inviting people.':'You are not part of a team yet. Ask an owner or manager to invite you.'}/></div>}
+    <section className="panel section-gap"><div className="panel-head"><div><span className="eyebrow"><Users style={{width:13,verticalAlign:'-2px',marginRight:5}}/>Everyone</span><h2>Workspace people</h2></div></div>
+      <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Title</th><th>Teams</th><th>Access</th></tr></thead><tbody>{payload.people.map(person=>{const memberOf=payload.teams.filter(t=>t.members.some(m=>m.userId===person.id));return <tr key={person.id}><td><strong>{person.name}</strong></td><td>{person.email}</td><td>{person.role}</td><td>{memberOf.length?memberOf.map(t=>t.name).join(', '):<span style={{color:'#999'}}>No team</span>}</td><td><span className={`status ${accessClass(person.accessRole)}`}>{person.accessRole==='owner'?<ShieldCheck style={{width:11,verticalAlign:'-1px',marginRight:4}}/>:null}{accessLabel(person.accessRole)}</span></td></tr>})}</tbody></table></div>
+      {payload.canCreateTeams&&<div style={{marginTop:16}}><InviteForm label="Invite to the workspace without a team" teamId="" busy={busy} run={run}/></div>}
+      {payload.workspaceInvites.map(invite=><InviteRow key={invite.id} invite={invite} busy={busy} run={run}/>)}
+    </section>
+    {unassigned.length>0&&<section className="panel section-gap"><div className="panel-head"><div><span className="eyebrow">Unassigned</span><h2>Projects without a team</h2></div></div><div className="project-list">{unassigned.map(p=><button className="project-row" key={p.id} onClick={()=>openProject(p.id)}><div className="project-code">{p.number}</div><div className="grow"><strong>{p.name}</strong><span>{p.nextAction}</span></div><ChevronRight/></button>)}</div></section>}
+  </>
+}
+
+function TeamCard({team,people,projects,canDelete,busy,run,openProject}:{team:Team;people:Person[];projects:Project[];canDelete:boolean;busy:boolean;run:(body:Record<string,unknown>)=>Promise<boolean>;openProject:(id:string)=>void}){
+  const [editing,setEditing] = useState(false)
+  const [draft,setDraft] = useState({name:team.name,description:team.description})
+  const [addUser,setAddUser] = useState('')
+  const available = people.filter(person=>!team.members.some(member=>member.userId===person.id))
+  const save = async(event:React.FormEvent)=>{event.preventDefault();if(await run({action:'updateTeam',teamId:team.id,...draft}))setEditing(false)}
+  return <div className="panel team-card">
+    <div className="panel-head"><div><span className="eyebrow">{team.members.length} member{team.members.length===1?'':'s'} · {projects.length} project{projects.length===1?'':'s'}</span><h2>{team.name}</h2>{team.description&&<p className="team-note">{team.description}</p>}</div>
+      {team.manageable&&<div className="team-head-actions"><button className="text-btn" onClick={()=>{setDraft({name:team.name,description:team.description});setEditing(value=>!value)}}>Edit</button>{canDelete&&<button className="icon danger" title="Delete team" onClick={()=>{if(confirm(`Delete ${team.name}? Its members keep their workspace access.`))void run({action:'deleteTeam',teamId:team.id})}}><Trash2/></button>}</div>}</div>
+    {editing&&<form className="form team-edit" onSubmit={save}><div className="form-row"><label>Team name<input required value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))}/></label><label>Description<input value={draft.description} onChange={e=>setDraft(d=>({...d,description:e.target.value}))}/></label></div><button className="secondary" type="submit" disabled={busy}>Save team</button></form>}
+    <div className="member-list">{team.members.map(member=><div className="member-row" key={member.userId}>
+      <div className="avatar small">{initials(member.name)}</div>
+      <div className="grow"><strong>{member.name}</strong><span>{member.email} · {accessLabel(member.accessRole)}</span></div>
+      {team.manageable
+        ? <><select value={member.teamRole} disabled={busy} onChange={e=>void run({action:'setTeamRole',teamId:team.id,userId:member.userId,teamRole:e.target.value})}><option value="member">Member</option><option value="lead">Team lead</option></select>
+          <button className="icon danger" title="Remove from team" onClick={()=>void run({action:'removeMember',teamId:team.id,userId:member.userId})}><X/></button></>
+        : <span className="status under-review">{member.teamRole==='lead'?'Team lead':'Member'}</span>}
+    </div>)}{!team.members.length&&<Empty text="No members yet."/>}</div>
+    {team.invites.map(invite=><InviteRow key={invite.id} invite={invite} busy={busy} run={run}/>)}
+    {team.manageable&&<>
+      {available.length>0&&<div className="member-add"><select value={addUser} onChange={e=>setAddUser(e.target.value)}><option value="">Add someone already in the workspace…</option>{available.map(person=><option key={person.id} value={person.id}>{person.name}</option>)}</select><button className="secondary" disabled={!addUser||busy} onClick={()=>{void run({action:'addMember',teamId:team.id,userId:addUser,teamRole:'member'});setAddUser('')}}><UserPlus/>Add</button></div>}
+      <InviteForm label={`Invite someone new to ${team.name}`} teamId={team.id} busy={busy} run={run}/>
+    </>}
+    {projects.length>0&&<div className="team-projects">{projects.slice(0,5).map(p=><button key={p.id} onClick={()=>openProject(p.id)}><span className={cls(p.status)}>{p.status}</span><strong>{p.name}</strong><ChevronRight/></button>)}</div>}
   </div>
 }
+
+function InviteForm({label,teamId,busy,run}:{label:string;teamId:string;busy:boolean;run:(body:Record<string,unknown>)=>Promise<boolean>}){
+  const [form,setForm] = useState({email:'',accessRole:'editor',teamRole:'member'})
+  const submit = async(event:React.FormEvent)=>{
+    event.preventDefault()
+    if(await run({action:'invite',teamId,...form})) setForm({email:'',accessRole:'editor',teamRole:'member'})
+  }
+  return <form className="invite-form" onSubmit={submit}>
+    <label><Mail/><input required type="email" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder={label}/></label>
+    <select value={form.accessRole} onChange={e=>setForm(f=>({...f,accessRole:e.target.value}))}><option value="editor">Coordinator — can edit</option><option value="viewer">Viewer — read only</option><option value="manager">Manager — manages teams</option></select>
+    {teamId&&<select value={form.teamRole} onChange={e=>setForm(f=>({...f,teamRole:e.target.value}))}><option value="member">Member</option><option value="lead">Team lead</option></select>}
+    <button className="primary" type="submit" disabled={busy}><UserPlus/>Invite</button>
+  </form>
+}
+
+function InviteRow({invite,busy,run}:{invite:TeamInvite;busy:boolean;run:(body:Record<string,unknown>)=>Promise<boolean>}){
+  const [copied,setCopied] = useState(false)
+  const link = `${window.location.origin}/?invite=${invite.token}`
+  const copy = async()=>{
+    try{await navigator.clipboard.writeText(link);setCopied(true);window.setTimeout(()=>setCopied(false),2000)}catch{prompt('Copy this invitation link',link)}
+  }
+  return <div className="invite-row">
+    <Mail/>
+    <div className="grow"><strong>{invite.email}</strong><span>Invited as {accessLabel(invite.accessRole)}{invite.teamRole==='lead'?' · team lead':''} · expires {prettyDate(invite.expiresAt.slice(0,10))}</span></div>
+    <button className="secondary" onClick={copy}>{copied?<Check/>:<Copy/>}{copied?'Copied':'Copy link'}</button>
+    <button className="icon danger" title="Revoke invitation" disabled={busy} onClick={()=>void run({action:'revokeInvite',inviteId:invite.id})}><X/></button>
+  </div>
+}
+
 function Empty({text}:{text:string}){return <div className="empty"><ClipboardCheck/><p>{text}</p></div>}
 
 export default App
