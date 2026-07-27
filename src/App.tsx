@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { api } from './api'
 import { useAuth, useReadOnly } from './auth-context'
-import BudgetSheet, { type BudgetCategoryFunding, type BudgetLine } from './BudgetSheet'
+import BudgetSheet, { type BudgetCategory, type BudgetCategoryFunding, type BudgetLine } from './BudgetSheet'
 import { ProjectInvoices, VendorTracker } from './ProjectVendors'
 import { summarizeVendors, vendorKey, vendorReadiness, type Invoice, type VendorRecord } from './vendors'
 
@@ -21,7 +21,7 @@ type Item = { id: string; projectId: string; title: string; type: string; respon
 type Activity = { id: string; projectId: string; action: string; detail: string; date: string }
 type Store = {
   projects: Project[]; items: Item[]; invoices: Invoice[]; activities: Activity[]
-  budgetLines: BudgetLine[]; budgetCategoryFunds: BudgetCategoryFunding[]; vendors: VendorRecord[]
+  budgetLines: BudgetLine[]; budgetCategoryFunds: BudgetCategoryFunding[]; budgetCategories: BudgetCategory[]; vendors: VendorRecord[]
 }
 type View = 'dashboard'|'projects'|'items'|'followups'|'reports'|'teams'|'settings'
 
@@ -42,14 +42,14 @@ const overdue = (s:string) => Boolean(s && s < date(0))
 const nav: {id:View;label:string;icon:typeof LayoutDashboard}[] = [
   {id:'dashboard',label:'Dashboard',icon:LayoutDashboard},{id:'projects',label:'Projects',icon:FolderKanban},{id:'items',label:'Outstanding Items',icon:ClipboardCheck},{id:'followups',label:'Follow-Ups',icon:BellRing},{id:'reports',label:'Reports',icon:BarChart3},{id:'teams',label:'Teams',icon:Users},{id:'settings',label:'Settings',icon:Settings}
 ]
-const emptyStore: Store = {projects:[],items:[],invoices:[],activities:[],budgetLines:[],budgetCategoryFunds:[],vendors:[]}
+const emptyStore: Store = {projects:[],items:[],invoices:[],activities:[],budgetLines:[],budgetCategoryFunds:[],budgetCategories:[],vendors:[]}
 const emptyTeams: TeamsPayload = {teams:[],people:[],workspaceInvites:[],canCreateTeams:false}
 const list = <T,>(value:unknown):T[]=>Array.isArray(value)?value as T[]:[]
 const readStore = ():Store=>{
   try{
     const value=JSON.parse(localStorage.getItem('closeflow-v1')||'null')
     if(!value||!Array.isArray(value.projects))return emptyStore
-    return {projects:value.projects as Project[],items:list<Item>(value.items),invoices:list<Invoice>(value.invoices),activities:list<Activity>(value.activities),budgetLines:list<BudgetLine>(value.budgetLines),budgetCategoryFunds:list<BudgetCategoryFunding>(value.budgetCategoryFunds),vendors:list<VendorRecord>(value.vendors)}
+    return {projects:value.projects as Project[],items:list<Item>(value.items),invoices:list<Invoice>(value.invoices),activities:list<Activity>(value.activities),budgetLines:list<BudgetLine>(value.budgetLines),budgetCategoryFunds:list<BudgetCategoryFunding>(value.budgetCategoryFunds),budgetCategories:list<BudgetCategory>(value.budgetCategories),vendors:list<VendorRecord>(value.vendors)}
   }catch{return emptyStore}
 }
 /** A project's committed total is the sum of its budget lines. */
@@ -104,6 +104,19 @@ function App(){
     const same=(item:BudgetCategoryFunding)=>item.projectId===funding.projectId&&item.categoryCode===funding.categoryCode
     return {...d,budgetCategoryFunds:d.budgetCategoryFunds.some(same)?d.budgetCategoryFunds.map(item=>same(item)?funding:item):[...d.budgetCategoryFunds,funding]}
   })
+  const saveBudgetCategory=(category:BudgetCategory)=>setData(d=>{
+    const same=(item:BudgetCategory)=>item.projectId===category.projectId&&item.code===category.code
+    return {...d,budgetCategories:d.budgetCategories.some(same)?d.budgetCategories.map(item=>same(item)?category:item):[...d.budgetCategories,category]}
+  })
+  /** Removing a category takes its funded amount and its line items with it. */
+  const deleteBudgetCategory=(projectId:string,code:string)=>setData(d=>{
+    const budgetLines=d.budgetLines.filter(line=>!(line.projectId===projectId&&line.categoryCode===code))
+    return {...d,
+      budgetLines,
+      budgetCategories:d.budgetCategories.filter(item=>!(item.projectId===projectId&&item.code===code)),
+      budgetCategoryFunds:d.budgetCategoryFunds.filter(item=>!(item.projectId===projectId&&item.categoryCode===code)),
+      projects:withCommitted(d.projects,budgetLines,projectId)}
+  })
   const saveVendor=(record:VendorRecord)=>setData(d=>({...d,vendors:d.vendors.some(item=>item.id===record.id)?d.vendors.map(item=>item.id===record.id?record:item):[...d.vendors,record]}))
   const saveInvoice=(invoice:Invoice)=>setData(d=>({...d,invoices:d.invoices.some(item=>item.id===invoice.id)?d.invoices.map(item=>item.id===invoice.id?invoice:item):[invoice,...d.invoices]}))
   const deleteInvoice=(id:string)=>setData(d=>({...d,invoices:d.invoices.filter(item=>item.id!==id)}))
@@ -119,7 +132,7 @@ function App(){
     <main className="main">
       <header className="topbar"><button className="icon menu" onClick={()=>setMobile(true)}><Menu/></button><div className="global-search"><Search/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search projects, vendors, or numbers"/></div><button className="icon"><BellRing/></button>{!readOnly&&<button className="primary" onClick={()=>setModal('project')}><Plus/>New project</button>}</header>
       <div className="content">
-        {project ? <ProjectDetail project={project} data={data} teamName={teamName(project.teamId)} readOnly={readOnly} updateProject={updateProject} updateItem={updateItem} addActivity={addActivity} back={()=>setSelected(null)} addItem={()=>setModal('item')} saveBudgetLine={saveBudgetLine} deleteBudgetLine={deleteBudgetLine} saveCategoryFunding={saveCategoryFunding} saveVendor={saveVendor} saveInvoice={saveInvoice} deleteInvoice={deleteInvoice}/> :
+        {project ? <ProjectDetail project={project} data={data} teamName={teamName(project.teamId)} readOnly={readOnly} updateProject={updateProject} updateItem={updateItem} addActivity={addActivity} back={()=>setSelected(null)} addItem={()=>setModal('item')} saveBudgetLine={saveBudgetLine} deleteBudgetLine={deleteBudgetLine} saveCategoryFunding={saveCategoryFunding} saveBudgetCategory={saveBudgetCategory} deleteBudgetCategory={deleteBudgetCategory} saveVendor={saveVendor} saveInvoice={saveInvoice} deleteInvoice={deleteInvoice}/> :
         view==='dashboard'?<Dashboard data={data} openProject={setSelected} setView={go}/>:
         view==='projects'?<Projects projects={filteredProjects} filter={filter} setFilter={setFilter} openProject={setSelected} add={()=>setModal('project')} readOnly={readOnly}/>:
         view==='items'?<Items items={data.items} projectName={projectName} update={updateItem} add={()=>setModal('item')} readOnly={readOnly}/>:
@@ -156,9 +169,9 @@ function FollowUps({items,projects,update,log,readOnly}:{items:Item[];projects:P
 
 function Reports({data}:{data:Store}){const byStatus=projectStatuses.map(status=>({status,count:data.projects.filter(p=>p.status===status).length}));const vendors=Object.entries(data.items.filter(i=>i.status!=='Resolved').reduce<Record<string,number>>((a,i)=>({...a,[i.responsible]:(a[i.responsible]||0)+1}),{})).sort((a,b)=>b[1]-a[1]);return <><PageHead eyebrow="Operational reporting" title="Reports" copy="See where closeout work is aging, which parties are holding items, and how much remains unresolved."/><section className="report-grid"><div className="panel"><h2>Projects by stage</h2><div className="report-bars">{byStatus.map(r=><div key={r.status}><span>{r.status}</span><div className="bar"><i style={{width:`${data.projects.length?r.count/data.projects.length*100:0}%`}}/></div><strong>{r.count}</strong></div>)}</div></div><div className="panel"><h2>Outstanding by party</h2><div className="rank-list">{vendors.map(([name,count],n)=><div key={name}><b>{n+1}</b><span>{name}</span><strong>{count} item{count===1?'':'s'}</strong></div>)}{!vendors.length&&<Empty text="Nothing outstanding."/>}</div></div><div className="panel span-2"><h2>Financial summary</h2><div className="financial-grid"><div><span>Total project budget</span><strong>{money(data.projects.reduce((a,b)=>a+b.budget,0))}</strong></div><div><span>Current commitments</span><strong>{money(data.projects.reduce((a,b)=>a+b.committed,0))}</strong></div><div><span>Unpaid invoices</span><strong>{money(data.invoices.filter(i=>i.status!=='Paid').reduce((a,b)=>a+b.amount,0))}</strong></div><div><span>Disputed amount</span><strong>{money(data.invoices.reduce((a,b)=>a+b.disputed,0))}</strong></div></div></div></section></>}
 
-function ProjectDetail({project,data,teamName,readOnly,updateProject,updateItem,addActivity,back,addItem,saveBudgetLine,deleteBudgetLine,saveCategoryFunding,saveVendor,saveInvoice,deleteInvoice}:{project:Project;data:Store;teamName:string;readOnly:boolean;updateProject:(id:string,p:Partial<Project>)=>void;updateItem:(id:string,p:Partial<Item>)=>void;addActivity:(pid:string,a:string,d:string)=>void;back:()=>void;addItem:()=>void;saveBudgetLine:(line:BudgetLine)=>void;deleteBudgetLine:(projectId:string,id:string)=>void;saveCategoryFunding:(funding:BudgetCategoryFunding)=>void;saveVendor:(record:VendorRecord)=>void;saveInvoice:(invoice:Invoice)=>void;deleteInvoice:(id:string)=>void}){
+function ProjectDetail({project,data,teamName,readOnly,updateProject,updateItem,addActivity,back,addItem,saveBudgetLine,deleteBudgetLine,saveCategoryFunding,saveBudgetCategory,deleteBudgetCategory,saveVendor,saveInvoice,deleteInvoice}:{project:Project;data:Store;teamName:string;readOnly:boolean;updateProject:(id:string,p:Partial<Project>)=>void;updateItem:(id:string,p:Partial<Item>)=>void;addActivity:(pid:string,a:string,d:string)=>void;back:()=>void;addItem:()=>void;saveBudgetLine:(line:BudgetLine)=>void;deleteBudgetLine:(projectId:string,id:string)=>void;saveCategoryFunding:(funding:BudgetCategoryFunding)=>void;saveBudgetCategory:(category:BudgetCategory)=>void;deleteBudgetCategory:(projectId:string,code:string)=>void;saveVendor:(record:VendorRecord)=>void;saveInvoice:(invoice:Invoice)=>void;deleteInvoice:(id:string)=>void}){
   const items=data.items.filter(i=>i.projectId===project.id), invoices=data.invoices.filter(i=>i.projectId===project.id), activities=data.activities.filter(a=>a.projectId===project.id).sort((a,b)=>b.date.localeCompare(a.date)); const resolved=items.filter(i=>i.status==='Resolved').length; const progress=items.length?Math.round(resolved/items.length*100):100
-  const lines=data.budgetLines.filter(l=>l.projectId===project.id), categoryFunds=data.budgetCategoryFunds.filter(f=>f.projectId===project.id), vendorRecords=data.vendors.filter(v=>v.projectId===project.id)
+  const lines=data.budgetLines.filter(l=>l.projectId===project.id), categoryFunds=data.budgetCategoryFunds.filter(f=>f.projectId===project.id), budgetCategories=data.budgetCategories.filter(c=>c.projectId===project.id), vendorRecords=data.vendors.filter(v=>v.projectId===project.id)
   const vendors=summarizeVendors(lines,invoices,vendorRecords), readiness=vendorReadiness(vendors)
   const poFor=(vendor:string)=>vendorRecords.find(r=>vendorKey(r.vendor)===vendorKey(vendor))?.poNumber||''
   // Closing a project while a vendor still owes its closeout letter is the mistake this app exists to prevent.
@@ -172,7 +185,7 @@ function ProjectDetail({project,data,teamName,readOnly,updateProject,updateItem,
   <section className="detail-grid"><div className="panel span-2"><div className="panel-head"><div><span className="eyebrow">Primary action</span><h2>What happens next</h2></div></div><div className="next-action"><div className="next-num">01</div><div><strong>{project.nextAction}</strong><span>Owner: {project.owner} · Due {prettyDate(project.due)}</span></div>{!readOnly&&<button className="primary" onClick={()=>{addActivity(project.id,'Action completed',project.nextAction);updateProject(project.id,{status:'Ready to Close',nextAction:'Complete final closeout verification',due:date(1)})}}>Complete action</button>}</div></div>
   <div className="panel"><h2>Project information</h2><dl className="info-list"><div><dt>Team</dt><dd>{teamName||'Unassigned'}</dd></div><div><dt>Project manager</dt><dd>{project.manager}</dd></div><div><dt>Primary vendor</dt><dd>{project.vendor||'—'}</dd></div><div><dt>Vendors</dt><dd>{vendors.length?`${vendors.length} on budget lines`:'None yet'}</dd></div><div><dt>Closeout letters</dt><dd>{readiness.settledLetters} of {readiness.vendors} settled</dd></div><div><dt>Target closeout</dt><dd>{prettyDate(project.target)}</dd></div><div><dt>Original budget</dt><dd>{money(project.budget)}</dd></div><div><dt>Committed</dt><dd>{money(project.committed)}</dd></div><div><dt>Uncommitted</dt><dd>{money(project.budget-project.committed)}</dd></div></dl></div></section>
   <section className="panel section-gap"><div className="panel-head"><div><span className="eyebrow">Requirements</span><h2>Outstanding items</h2></div>{!readOnly&&<button className="secondary" onClick={addItem}><Plus/>Add item</button>}</div><div className="table-wrap"><table><thead><tr><th>Item</th><th>Responsible</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead><tbody>{items.map(i=><tr key={i.id}><td><strong>{i.title}</strong><span>{i.type}</span></td><td>{i.responsible}</td><td>{i.amount?money(i.amount):'—'}</td><td className={overdue(i.due)&&i.status!=='Resolved'?'danger-text':''}>{prettyDate(i.due)}</td><td>{readOnly?<span className={cls(i.status)}>{i.status}</span>:<select value={i.status} onChange={e=>updateItem(i.id,{status:e.target.value as ItemStatus})}>{itemStatuses.map(s=><option key={s}>{s}</option>)}</select>}</td></tr>)}</tbody></table></div></section>
-  <BudgetSheet project={project} lines={lines} categoryFunds={categoryFunds} vendorOptions={vendors.map(v=>v.name)} readOnly={readOnly} onSaveLine={saveBudgetLine} onDeleteLine={id=>deleteBudgetLine(project.id,id)} onSaveCategoryFunding={saveCategoryFunding} onUpdateProject={patch=>updateProject(project.id,patch)}/>
+  <BudgetSheet project={project} lines={lines} categoryFunds={categoryFunds} categories={budgetCategories} vendorOptions={vendors.map(v=>v.name)} readOnly={readOnly} onSaveLine={saveBudgetLine} onDeleteLine={id=>deleteBudgetLine(project.id,id)} onSaveCategoryFunding={saveCategoryFunding} onSaveCategory={saveBudgetCategory} onDeleteCategory={code=>deleteBudgetCategory(project.id,code)} onUpdateProject={patch=>updateProject(project.id,patch)}/>
   <VendorTracker projectId={project.id} summaries={vendors} readiness={readiness} readOnly={readOnly} onSaveVendor={saveVendor} onLog={(action,detail)=>addActivity(project.id,action,detail)}/>
   <ProjectInvoices projectId={project.id} invoices={invoices} vendorOptions={vendors.map(v=>v.name)} poFor={poFor} readOnly={readOnly} onSave={saveInvoice} onDelete={deleteInvoice}/>
   <section className="panel section-gap"><h2>Activity</h2><div className="activity-list">{activities.map(a=><div key={a.id}><i/><div><strong>{a.action}</strong><p>{a.detail}</p><span>{new Date(a.date).toLocaleDateString()}</span></div></div>)}{!activities.length&&<Empty text="No activity recorded."/>}</div></section></>

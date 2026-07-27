@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { eq } from 'drizzle-orm'
-import { activities, closeoutItems, invoices, projectBudgetCategoryFunds, projectBudgetLines, projectVendors, projects } from '../db/schema.js'
+import { activities, closeoutItems, invoices, projectBudgetCategories, projectBudgetCategoryFunds, projectBudgetLines, projectVendors, projects } from '../db/schema.js'
 import { requireSession } from './_lib/auth.js'
 import { ensureSchema, getDb, isDatabaseConfigured } from './_lib/db.js'
 
@@ -12,6 +12,7 @@ type StorePayload = {
   activities?: Record<string, unknown>[]
   budgetLines?: Record<string, unknown>[]
   budgetCategoryFunds?: Record<string, unknown>[]
+  budgetCategories?: Record<string, unknown>[]
   vendors?: Record<string, unknown>[]
 }
 
@@ -21,7 +22,8 @@ const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value
 const date = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(text(value)) ? text(value) : new Date().toISOString().slice(0, 10)
 const timestamp = (value: unknown) => Number.isNaN(new Date(text(value)).getTime()) ? new Date().toISOString() : new Date(text(value)).toISOString()
 const id = (value: unknown) => text(value) || randomUUID()
-const categoryCode = (value: unknown) => ['0', '1', '2', '3', '4'].includes(text(value)) ? text(value) : '1'
+/** Projects add their own cost categories, so any short code is accepted. */
+const categoryCode = (value: unknown) => text(value).trim().slice(0, 8) || '1'
 /** Optional dates are stored as null and read back as an empty string. */
 const optionalDate = (value: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(text(value)) ? text(value) : null
 const letterStatuses = ['Not Requested', 'Requested', 'Received', 'Accepted', 'Not Required']
@@ -36,7 +38,7 @@ const isSample = (row: Record<string, unknown>) =>
 const live = (rows: Record<string, unknown>[] | undefined) => (rows || []).filter((row) => !isSample(row))
 
 const validateStore = (store: StorePayload) => {
-  const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines, store.budgetCategoryFunds, store.vendors]
+  const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines, store.budgetCategoryFunds, store.budgetCategories, store.vendors]
   return groups.every((group) => group === undefined || (Array.isArray(group) && group.length <= 5000))
 }
 
@@ -51,13 +53,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const workspaceId = session.workspaceId
 
     if (req.method === 'GET') {
-      const [projectRows, itemRows, invoiceRows, activityRows, budgetRows, categoryFundRows, vendorRows] = await Promise.all([
+      const [projectRows, itemRows, invoiceRows, activityRows, budgetRows, categoryFundRows, categoryRows, vendorRows] = await Promise.all([
         db.select().from(projects).where(eq(projects.workspaceId, workspaceId)),
         db.select().from(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId)),
         db.select().from(invoices).where(eq(invoices.workspaceId, workspaceId)),
         db.select().from(activities).where(eq(activities.workspaceId, workspaceId)),
         db.select().from(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId)),
         db.select().from(projectBudgetCategoryFunds).where(eq(projectBudgetCategoryFunds.workspaceId, workspaceId)),
+        db.select().from(projectBudgetCategories).where(eq(projectBudgetCategories.workspaceId, workspaceId)),
         db.select().from(projectVendors).where(eq(projectVendors.workspaceId, workspaceId)),
       ])
       return res.status(200).json({
@@ -67,6 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         activities: activityRows.map(({ workspaceId: _, occurredAt, ...row }) => ({ ...row, date: occurredAt })),
         budgetLines: budgetRows.map(({ workspaceId: _, ...row }) => row),
         budgetCategoryFunds: categoryFundRows.map(({ workspaceId: _, ...row }) => row),
+        budgetCategories: categoryRows.map((row) => ({ projectId: row.projectId, code: row.code, name: row.name })),
         vendors: vendorRows.map(({ workspaceId: _, poDate, letterRequested, letterReceived, ...row }) => ({
           ...row,
           poDate: poDate || '',
@@ -88,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await db.delete(invoices).where(eq(invoices.workspaceId, workspaceId))
     await db.delete(closeoutItems).where(eq(closeoutItems.workspaceId, workspaceId))
     await db.delete(projectVendors).where(eq(projectVendors.workspaceId, workspaceId))
+    await db.delete(projectBudgetCategories).where(eq(projectBudgetCategories.workspaceId, workspaceId))
     await db.delete(projectBudgetCategoryFunds).where(eq(projectBudgetCategoryFunds.workspaceId, workspaceId))
     await db.delete(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId))
     await db.delete(projects).where(eq(projects.workspaceId, workspaceId))
@@ -130,6 +135,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       categoryCode: categoryCode(row.categoryCode),
       funded: Math.max(0, number(row.funded)),
     }))
+    // Codes are trimmed and capped, so two rows can collapse onto one primary key.
+    const categoryValues = [...new Map(live(store.budgetCategories).map((row) => {
+      const value = {
+        workspaceId,
+        projectId: text(row.projectId),
+        code: categoryCode(row.code),
+        name: text(row.name, 'Untitled category').slice(0, 80),
+      }
+      return [`${value.projectId}::${value.code}`, value] as const
+    })).values()]
     const vendorValues = live(store.vendors).map((row) => ({
       workspaceId,
       id: id(row.id),
@@ -183,6 +198,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (projectValues.length) await db.insert(projects).values(projectValues)
     if (budgetValues.length) await db.insert(projectBudgetLines).values(budgetValues)
     if (categoryFundValues.length) await db.insert(projectBudgetCategoryFunds).values(categoryFundValues)
+    if (categoryValues.length) await db.insert(projectBudgetCategories).values(categoryValues)
     if (vendorValues.length) await db.insert(projectVendors).values(vendorValues)
     if (itemValues.length) await db.insert(closeoutItems).values(itemValues)
     if (invoiceValues.length) await db.insert(invoices).values(invoiceValues)
