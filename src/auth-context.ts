@@ -2,6 +2,12 @@ import { createContext, useContext } from 'react'
 
 export type AccessRole = 'owner' | 'manager' | 'editor' | 'viewer'
 
+export type WorkspaceSummary = {
+  id: string
+  name: string
+  accessRole: string
+}
+
 export type CurrentUser = {
   id: string
   name: string
@@ -11,6 +17,8 @@ export type CurrentUser = {
   workspaceId: string
   workspaceName: string
   accessRole: string
+  /** Every workspace this account belongs to: its own, plus any it was invited into. */
+  workspaces: WorkspaceSummary[]
 }
 
 export const AuthContext = createContext<CurrentUser | null>(null)

@@ -120,10 +120,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (existing) {
         const member = (await db.select({ userId: workspaceMembers.userId }).from(workspaceMembers)
           .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, existing.id))).limit(1))[0]
-        if (!member) return res.status(409).json({ error: 'That email already belongs to another workspace.' })
-        if (!teamId) return res.status(409).json({ error: 'That person is already in this workspace.' })
-        await db.insert(teamMembers).values({ workspaceId, teamId, userId: existing.id, teamRole }).onConflictDoNothing()
-        return res.status(200).json({ ...await readTeams(session), added: true })
+        // Someone already in this workspace joins the team straight away. Anyone else has their own
+        // account elsewhere, so they get an invitation to accept from it rather than a rejection.
+        if (member) {
+          if (!teamId) return res.status(409).json({ error: 'That person is already in this workspace.' })
+          await db.insert(teamMembers).values({ workspaceId, teamId, userId: existing.id, teamRole }).onConflictDoNothing()
+          return res.status(200).json({ ...await readTeams(session), added: true })
+        }
       }
 
       const pending = (await db.select({ id: teamInvites.id }).from(teamInvites)
