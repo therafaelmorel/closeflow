@@ -1,12 +1,13 @@
 import { createContext, useContext } from 'react'
 
-export type AccessRole = 'owner' | 'editor' | 'viewer'
+export type AccessRole = 'owner' | 'manager' | 'editor' | 'viewer'
 
 export type CurrentUser = {
   id: string
   name: string
   email: string
   role: string
+  department: string
   workspaceId: string
   workspaceName: string
   accessRole: string

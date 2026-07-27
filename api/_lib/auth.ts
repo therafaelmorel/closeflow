@@ -11,6 +11,7 @@ export type SessionUser = {
   name: string
   email: string
   role: string
+  department: string
   workspaceId: string
   workspaceName: string
   accessRole: string
@@ -80,6 +81,7 @@ export async function getSessionUser(req: VercelRequest): Promise<SessionUser | 
       name: users.name,
       email: users.email,
       role: users.role,
+      department: users.department,
       workspaceId: workspaces.id,
       workspaceName: workspaces.name,
       accessRole: workspaceMembers.accessRole,
