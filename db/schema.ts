@@ -120,6 +120,25 @@ export const projectBudgetCategoryFunds = pgTable('project_budget_category_funds
   funded: doublePrecision('funded').notNull().default(0),
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.projectId, table.categoryCode] })])
 
+/**
+ * One row per vendor working on a project. The vendor list itself comes from the
+ * budget lines; this table holds what has to be tracked before the project can be
+ * closed out: the vendor's purchase order and its closeout letter.
+ */
+export const projectVendors = pgTable('project_vendors', {
+  workspaceId: text('workspace_id').notNull(),
+  id: text('id').notNull(),
+  projectId: text('project_id').notNull(),
+  vendor: text('vendor').notNull(),
+  poNumber: text('po_number').notNull().default(''),
+  poAmount: doublePrecision('po_amount').notNull().default(0),
+  poDate: date('po_date', { mode: 'string' }),
+  letterStatus: text('letter_status').notNull().default('Not Requested'),
+  letterRequested: date('letter_requested', { mode: 'string' }),
+  letterReceived: date('letter_received', { mode: 'string' }),
+  notes: text('notes').notNull().default(''),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.id] })])
+
 export const closeoutItems = pgTable('closeout_items', {
   workspaceId: text('workspace_id').notNull(),
   id: text('id').notNull(),

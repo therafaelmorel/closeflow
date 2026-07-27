@@ -1,0 +1,51 @@
+.vendor-panel .panel-head{align-items:flex-start}
+.vendor-note{margin:8px 0 0;color:#6f6f6f;font-size:12px;line-height:1.55;max-width:760px}
+.vendor-readiness{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0 4px}
+.vendor-readiness-card{border:1px solid #e7e7e1;border-radius:12px;padding:14px 15px;min-width:0}
+.vendor-readiness-card.danger{background:#fff2ef;border-color:#efc0b8}
+.vendor-readiness-card>span{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#777;font-weight:700}
+.vendor-readiness-card>strong{display:block;font-size:22px;letter-spacing:-.035em;margin:9px 0 5px}
+.vendor-readiness-card.danger>strong{color:#b42318}
+.vendor-readiness-card>small{font-size:10px;color:#888;line-height:1.35}
+.vendor-clear{display:flex;align-items:center;gap:9px;margin-top:14px;padding:12px 14px;border-radius:11px;background:#eef8f0;border:1px solid #b9dfc3;color:#1f6b36;font-size:12px;font-weight:600}
+.vendor-clear svg{width:16px;flex:none}
+.vendor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-top:16px}
+.vendor-card{border:1px solid #e6e6e0;border-radius:13px;padding:16px;min-width:0}
+.vendor-card.flagged{border-color:#e9c3bc}
+.vendor-card.ready{border-color:#bfdfc7;background:#fbfefb}
+.vendor-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.vendor-card h3{margin:0 0 4px;font-size:15px;letter-spacing:-.02em;overflow-wrap:anywhere}
+.vendor-card header small{font-size:10px;color:#888}
+.letter-badge{flex:none;font-size:10px;font-weight:700;padding:5px 9px;border-radius:20px;background:#f0f0ec;color:#5c5c5c;white-space:nowrap}
+.letter-badge.requested{background:#fff4dd;color:#7a5714}
+.letter-badge.received{background:#e8eefb;color:#28457e}
+.letter-badge.accepted{background:#e6f5ea;color:#1f6b36}
+.letter-badge.not-required{background:#f1f0f6;color:#55507a}
+.vendor-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:15px 0 13px}
+.vendor-metrics span{display:block;font-size:8px;text-transform:uppercase;letter-spacing:.07em;color:#888;margin-bottom:5px}
+.vendor-metrics strong{font-size:13px;letter-spacing:-.02em}
+.vendor-checks{display:flex;flex-direction:column;gap:6px;padding:11px 12px;border-radius:10px;background:#fafaf7}
+.vendor-check{display:flex;align-items:center;gap:8px;font-size:11px;line-height:1.35}
+.vendor-check svg{width:14px;flex:none}
+.vendor-check.ok{color:#3f6f4c}
+.vendor-check.bad{color:#a23a2c;font-weight:600}
+.vendor-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.vendor-fields label,.vendor-notes{display:block;font-size:8px;text-transform:uppercase;letter-spacing:.07em;color:#888;font-weight:700}
+.vendor-notes{margin-top:10px}
+.vendor-fields input,.vendor-fields select,.vendor-notes input{display:block;width:100%;margin-top:5px;border:1px solid #d9d9d2;border-radius:7px;background:#fff;padding:8px 9px;font-size:11px;font-weight:400;letter-spacing:normal;text-transform:none;color:#171717;min-height:34px}
+.vendor-fields input:focus,.vendor-fields select:focus,.vendor-notes input:focus{outline:0;border-color:#111;box-shadow:0 0 0 1px #111}
+.vendor-money{display:flex;align-items:center;margin-top:5px;background:#fff;border:1px solid #d9d9d2;border-radius:7px;min-height:34px}
+.vendor-money b{font-size:11px;color:#777;padding-left:9px}
+.vendor-money input{border:0;margin:0;border-radius:0;padding-left:3px;min-height:32px}
+.vendor-money input:focus{box-shadow:none;border:0}
+.vendor-money:focus-within{border-color:#111;box-shadow:0 0 0 1px #111}
+.vendor-readonly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin:14px 0 0}
+.vendor-readonly>div{min-width:0}
+.vendor-readonly .wide{grid-column:1/-1}
+.vendor-readonly dt{font-size:8px;text-transform:uppercase;letter-spacing:.07em;color:#888;font-weight:700}
+.vendor-readonly dd{margin:4px 0 0;font-size:12px}
+.vendor-card-actions{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+.invoice-table td:last-child,.invoice-table th:last-child{width:1%;white-space:nowrap}
+.invoice-table select,.invoice-table input{font-size:11px}
+@media(max-width:1180px){.vendor-grid{grid-template-columns:1fr}}
+@media(max-width:880px){.vendor-readiness{grid-template-columns:repeat(2,minmax(0,1fr))}.vendor-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.vendor-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
