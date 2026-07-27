@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import './budget.css'
 
 export type BudgetCategoryCode = '0' | '1' | '2' | '3' | '4'
@@ -33,6 +33,9 @@ type BudgetSheetProps = {
   project: BudgetProject
   lines: BudgetLine[]
   categoryFunds: BudgetCategoryFunding[]
+  /** Vendors already on this project, offered while naming a new line item. */
+  vendorOptions?: string[]
+  readOnly?: boolean
   onSaveLine: (line: BudgetLine) => void
   onDeleteLine: (id: string) => void
   onSaveCategoryFunding: (funding: BudgetCategoryFunding) => void
@@ -61,6 +64,8 @@ export default function BudgetSheet({
   project,
   lines,
   categoryFunds,
+  vendorOptions = [],
+  readOnly = false,
   onSaveLine,
   onDeleteLine,
   onSaveCategoryFunding,
@@ -70,6 +75,7 @@ export default function BudgetSheet({
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [editingTotal, setEditingTotal] = useState(false)
   const [totalBudget, setTotalBudget] = useState(String(project.budget || 0))
+  const vendorListId = useId()
 
   const calculations = useMemo(() => {
     const categoryFunded = categoryFunds.reduce((total, category) => total + Number(category.funded || 0), 0)
@@ -104,8 +110,10 @@ export default function BudgetSheet({
         <h2>Budget sheet</h2>
         <p>Assign the approved project budget to hospital cost categories, then reconcile each commitment against what has actually been spent.</p>
       </div>
-      <button className="budget-text-button" onClick={() => { setTotalBudget(String(project.budget || 0)); setEditingTotal(true) }}>Edit total budget</button>
+      {!readOnly && <button className="budget-text-button" onClick={() => { setTotalBudget(String(project.budget || 0)); setEditingTotal(true) }}>Edit total budget</button>}
     </div>
+
+    <datalist id={vendorListId}>{vendorOptions.map(vendor => <option key={vendor} value={vendor} />)}</datalist>
 
     <div className="budget-summary">
       <SummaryCard label="Total budget" value={money(project.budget)} detail="Approved project funding" />
@@ -137,15 +145,17 @@ export default function BudgetSheet({
               <small>{categoryLines.length} commitment{categoryLines.length === 1 ? '' : 's'}</small>
             </div>
             <div className="budget-category-totals">
-              <CategoryFundingInput
-                funded={funded}
-                onSave={value => onSaveCategoryFunding({ projectId: project.id, categoryCode: category.code, funded: value })}
-              />
+              {readOnly
+                ? <Metric label="Funded amount" value={money(funded)} />
+                : <CategoryFundingInput
+                    funded={funded}
+                    onSave={value => onSaveCategoryFunding({ projectId: project.id, categoryCode: category.code, funded: value })}
+                  />}
               <Metric label="Committed" value={money(committed)} />
               <Metric label="Spent" value={money(spent)} />
               <Metric label="Category funds remaining" value={money(categoryAvailable)} danger={categoryAvailable < 0} />
             </div>
-            <button className="budget-add-line" onClick={() => { setEditingLineId(null); setAddingCategory(category.code) }}>Add line item</button>
+            {!readOnly && <button className="budget-add-line" onClick={() => { setEditingLineId(null); setAddingCategory(category.code) }}>Add line item</button>}
           </header>
 
           {overFunded && <div className="budget-category-alert">Approved commitments exceed this category’s funded amount by {money(Math.abs(categoryAvailable))}.</div>}
@@ -159,6 +169,7 @@ export default function BudgetSheet({
                       key={line.id}
                       projectId={project.id}
                       categoryCode={category.code}
+                      vendorListId={vendorListId}
                       line={line}
                       onSave={updated => { onSaveLine(updated); setEditingLineId(null) }}
                       onCancel={() => setEditingLineId(null)}
@@ -166,6 +177,7 @@ export default function BudgetSheet({
                   : <BudgetDisplayRow
                       key={line.id}
                       line={line}
+                      readOnly={readOnly}
                       onEdit={() => { setAddingCategory(null); setEditingLineId(line.id) }}
                       onDelete={() => { if (confirm(`Delete ${line.vendor || line.description}?`)) onDeleteLine(line.id) }}
                     />
@@ -173,10 +185,11 @@ export default function BudgetSheet({
                 {addingCategory === category.code && <InlineBudgetRow
                   projectId={project.id}
                   categoryCode={category.code}
+                  vendorListId={vendorListId}
                   onSave={line => { onSaveLine(line); setAddingCategory(null) }}
                   onCancel={() => setAddingCategory(null)}
                 />}
-                {!categoryLines.length && addingCategory !== category.code && <tr className="budget-empty-row"><td colSpan={5}>No commitments in this category. <button onClick={() => setAddingCategory(category.code)}>Add the first line item</button></td></tr>}
+                {!categoryLines.length && addingCategory !== category.code && <tr className="budget-empty-row"><td colSpan={5}>No commitments in this category.{!readOnly && <> <button onClick={() => setAddingCategory(category.code)}>Add the first line item</button></>}</td></tr>}
               </tbody>
               <tfoot><tr><td><strong>Category totals</strong><span>Funded: {money(funded)}</span></td><td>{money(committed)}</td><td>{money(spent)}</td><td className={amountIsOpen(unspent) ? 'budget-unspent' : ''}>{money(unspent)}</td><td /></tr></tfoot>
             </table>
@@ -220,14 +233,15 @@ function CategoryFundingInput({ funded, onSave }: { funded: number; onSave: (val
   return <label className="budget-funded-input"><span>Funded amount</span><div><b>$</b><input aria-label="Category funded amount" min="0" step="0.01" type="number" value={value} onChange={event => setValue(event.target.value)} onBlur={commit} onKeyDown={onKeyDown} placeholder="0" /></div></label>
 }
 
-function BudgetDisplayRow({ line, onEdit, onDelete }: { line: BudgetLine; onEdit: () => void; onDelete: () => void }) {
+function BudgetDisplayRow({ line, readOnly, onEdit, onDelete }: { line: BudgetLine; readOnly: boolean; onEdit: () => void; onDelete: () => void }) {
   const unspent = line.committed - line.spent
-  return <tr><td><strong>{line.vendor || line.description}</strong>{line.reference && <span>{line.reference}</span>}</td><td>{money(line.committed)}</td><td>{money(line.spent)}</td><td className={amountIsOpen(unspent) ? 'budget-unspent' : ''}>{money(unspent)}</td><td><div className="budget-actions"><button onClick={onEdit}>Edit</button><button className="danger" onClick={onDelete}>Delete</button></div></td></tr>
+  return <tr><td><strong>{line.vendor || line.description}</strong>{line.reference && <span>{line.reference}</span>}</td><td>{money(line.committed)}</td><td>{money(line.spent)}</td><td className={amountIsOpen(unspent) ? 'budget-unspent' : ''}>{money(unspent)}</td><td>{!readOnly && <div className="budget-actions"><button onClick={onEdit}>Edit</button><button className="danger" onClick={onDelete}>Delete</button></div>}</td></tr>
 }
 
-function InlineBudgetRow({ projectId, categoryCode, line, onSave, onCancel }: {
+function InlineBudgetRow({ projectId, categoryCode, vendorListId, line, onSave, onCancel }: {
   projectId: string
   categoryCode: BudgetCategoryCode
+  vendorListId: string
   line?: BudgetLine
   onSave: (line: BudgetLine) => void
   onCancel: () => void
@@ -262,7 +276,7 @@ function InlineBudgetRow({ projectId, categoryCode, line, onSave, onCancel }: {
   }
 
   return <tr className="budget-inline-row">
-    <td><input autoFocus aria-label="Vendor or line-item name" value={vendor} onChange={event => setVendor(event.target.value)} onKeyDown={onKeyDown} placeholder="Vendor or line-item name" /></td>
+    <td><input autoFocus aria-label="Vendor or line-item name" list={vendorListId} value={vendor} onChange={event => setVendor(event.target.value)} onKeyDown={onKeyDown} placeholder="Vendor or line-item name" /></td>
     <td><MoneyInput label="Committed approved" value={committed} setValue={setCommitted} onKeyDown={onKeyDown} /></td>
     <td><MoneyInput label="Spent to date" value={spent} setValue={setSpent} onKeyDown={onKeyDown} /></td>
     <td className={amountIsOpen(unspent) ? 'budget-unspent' : ''}><strong>{money(unspent)}</strong></td>

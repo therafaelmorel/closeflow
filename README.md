@@ -40,6 +40,16 @@ CloseFlow ships with no sample data. Every record is created by the people using
 
 Access levels: **Owner** and **Manager** administer teams and workspace access, **Coordinator** edits project records, and **Viewer** has read-only access.
 
+## Vendors, purchase orders, and closeout letters
+
+Everything financial belongs to a project, so it is tracked on that project's page rather than on a page of its own.
+
+- **Budget sheet** — assign the approved budget to cost categories and add a line item for each commitment. A line item carries the vendor's name, which is what puts that vendor on the project.
+- **Vendors and closeout letters** — every vendor named on a budget line gets a card with its approved commitment, its purchase order, everything invoiced against it, and the state of its closeout letter. Letters move from Not Requested to Requested, Received, and Accepted, or are marked Not Required; the dates are stamped as the status changes.
+- **Invoices** — invoices live on the project and are billed to one of its vendors. Adding one offers the project's vendors and fills in the purchase order already recorded for the vendor picked.
+
+A vendor is settled when three things agree: its purchase order matches its approved commitment, its invoices match that purchase order, and its closeout letter is accepted or not required. Each card says which of those is off and by how much, the project header counts the letters still owed, and setting a project to Ready to Close or Closed asks for confirmation while any letter is outstanding. The dashboard counts the letters owed across every open project.
+
 ## Local development
 
 ```bash

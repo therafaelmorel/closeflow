@@ -13,10 +13,6 @@ type Invite = { email: string; accessRole: string; workspaceName: string; teamNa
 
 type AuthAppProps = { children: ReactNode }
 
-declare global {
-  interface Window { __closeflowReadOnly?: boolean }
-}
-
 const DATA_KEY = 'closeflow-v1'
 const emptyStore: Store = { projects: [], items: [], invoices: [], activities: [] }
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'CF'
@@ -83,9 +79,6 @@ export default function AuthApp({ children }: AuthAppProps) {
   }, [loadWorkspace])
 
   useEffect(() => { void bootstrap() }, [bootstrap])
-
-  // Expose read-only state to the budget feature, which renders in its own React root.
-  useEffect(() => { window.__closeflowReadOnly = user?.accessRole === 'viewer' }, [user])
 
   const authenticate = async (action: 'signup' | 'login', values: { name?: string; email: string; role?: string; password: string; remember: boolean }) => {
     const token = inviteToken()
