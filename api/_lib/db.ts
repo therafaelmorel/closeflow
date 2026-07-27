@@ -25,7 +25,8 @@ export function getDb() {
 
 async function createSchema() {
   const sql = getSql()
-  await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text NOT NULL UNIQUE, name text NOT NULL, role text NOT NULL DEFAULT 'Project Coordinator', password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
+  await sql`CREATE TABLE IF NOT EXISTS users (id text PRIMARY KEY, email text NOT NULL UNIQUE, name text NOT NULL, role text NOT NULL DEFAULT 'Project Coordinator', department text NOT NULL DEFAULT '', password_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS department text NOT NULL DEFAULT ''`
   await sql`CREATE TABLE IF NOT EXISTS workspaces (id text PRIMARY KEY, name text NOT NULL, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`
   await sql`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id text NOT NULL, user_id text NOT NULL, access_role text NOT NULL DEFAULT 'owner', created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (workspace_id, user_id))`
   await sql`CREATE TABLE IF NOT EXISTS sessions (id text PRIMARY KEY, user_id text NOT NULL, token_hash text NOT NULL UNIQUE, expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`

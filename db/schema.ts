@@ -13,6 +13,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   name: text('name').notNull(),
   role: text('role').notNull().default('Project Coordinator'),
+  department: text('department').notNull().default(''),
   passwordHash: text('password_hash').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('users_email_unique').on(table.email)])

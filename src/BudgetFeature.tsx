@@ -39,10 +39,12 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
   const workspace = readWorkspace()
   const project = workspace?.projects.find(item => item.id === projectId)
   if (!workspace || !project) return null
+  const readOnly = typeof window !== 'undefined' && window.__closeflowReadOnly === true
   const lines = (workspace.budgetLines || []).filter(line => line.projectId === projectId)
   const categoryFunds = (workspace.budgetCategoryFunds || []).filter(item => item.projectId === projectId)
 
   const saveLine = (line: BudgetLine) => {
+    if (readOnly) return
     const current = readWorkspace()
     if (!current) return
     const budgetLines = current.budgetLines || []
@@ -54,6 +56,7 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
   }
 
   const deleteLine = (id: string) => {
+    if (readOnly) return
     const current = readWorkspace()
     if (!current) return
     current.budgetLines = (current.budgetLines || []).filter(item => item.id !== id)
@@ -63,6 +66,7 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
   }
 
   const saveCategoryFunding = (funding: BudgetCategoryFunding) => {
+    if (readOnly) return
     const current = readWorkspace()
     if (!current) return
     const funds = current.budgetCategoryFunds || []
@@ -75,6 +79,7 @@ function BudgetProjectMount({ projectId }: { projectId: string }) {
   }
 
   const updateProject = (patch: { budget?: number }) => {
+    if (readOnly) return
     const current = readWorkspace()
     if (!current) return
     current.projects = current.projects.map(item => item.id === projectId ? { ...item, ...patch, updated: new Date().toISOString() } : item)
