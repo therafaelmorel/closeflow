@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, Database, Eye, EyeOff, LoaderCircle, LockKeyhole, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { AuthContext, type CurrentUser } from './auth-context'
+import { api } from './api'
 import './auth.css'
 
-type AuthUser = { id: string; name: string; email: string; role: string; workspaceId: string; workspaceName: string; accessRole: string }
+type AuthUser = CurrentUser
 type Store = { projects: unknown[]; items: unknown[]; invoices: unknown[]; activities: unknown[] }
 type Screen = 'loading' | 'database' | 'setup' | 'login' | 'app' | 'error'
 type SyncState = 'synced' | 'saving' | 'error'
 
 type AuthAppProps = { children: ReactNode }
+
+declare global {
+  interface Window { __closeflowReadOnly?: boolean }
+}
 
 const DATA_KEY = 'closeflow-v1'
 const emptyStore: Store = { projects: [], items: [], invoices: [], activities: [] }
@@ -22,17 +28,6 @@ const readLocalStore = (): Store | null => {
   }
 }
 
-const api = async (path: string, init?: RequestInit) => {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw Object.assign(new Error(payload.error || 'Request failed'), { status: response.status, code: payload.code })
-  return payload
-}
-
 export default function AuthApp({ children }: AuthAppProps) {
   const [screen, setScreen] = useState<Screen>('loading')
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -45,7 +40,7 @@ export default function AuthApp({ children }: AuthAppProps) {
     const remoteIsEmpty = remote.projects.length === 0 && remote.items.length === 0 && remote.invoices.length === 0 && remote.activities.length === 0
     const localHasData = Boolean(local && (local.projects.length || local.items.length || local.invoices.length || local.activities.length))
     const workspace = remoteIsEmpty && localHasData ? local! : remote
-    if (remoteIsEmpty && localHasData) await api('/api/workspace', { method: 'PUT', body: JSON.stringify(workspace) })
+    if (remoteIsEmpty && localHasData && nextUser.accessRole !== 'viewer') await api('/api/workspace', { method: 'PUT', body: JSON.stringify(workspace) })
     localStorage.setItem(DATA_KEY, JSON.stringify(workspace || emptyStore))
     setUser(nextUser)
     setScreen('app')
@@ -67,6 +62,9 @@ export default function AuthApp({ children }: AuthAppProps) {
 
   useEffect(() => { void bootstrap() }, [bootstrap])
 
+  // Expose read-only state to the budget feature, which renders in its own React root.
+  useEffect(() => { window.__closeflowReadOnly = user?.accessRole === 'viewer' }, [user])
+
   const authenticate = async (action: 'signup' | 'login', values: { name?: string; email: string; role?: string; password: string; remember: boolean }) => {
     await api('/api/auth', { method: 'POST', body: JSON.stringify({ action, ...values }) })
     const state = await api('/api/auth')
@@ -84,16 +82,19 @@ export default function AuthApp({ children }: AuthAppProps) {
   if (screen === 'error') return <StatusScreen icon={<AlertTriangle />} title="CloseFlow could not open" copy={message || 'The application could not connect to its backend.'} action={<button className="auth-submit" onClick={bootstrap}><RefreshCw />Try again</button>} />
   if (screen === 'setup' || screen === 'login') return <AuthScreen setup={screen === 'setup'} submit={authenticate} />
 
-  return <>
+  const readOnly = user?.accessRole === 'viewer'
+  return <AuthContext.Provider value={user}>
     {children}
-    <WorkspaceSync onState={setSyncState} />
+    {!readOnly && <WorkspaceSync onState={setSyncState} />}
     <div className="auth-session">
       <div className="auth-session-avatar">{initials(user?.name || '')}</div>
       <div className="auth-session-meta"><strong>{user?.name}</strong><span>{user?.role}</span></div>
-      <div className={`auth-sync ${syncState}`}><i />{syncState === 'saving' ? 'Saving' : syncState === 'error' ? 'Sync issue' : 'Synced'}</div>
+      {readOnly
+        ? <div className="auth-sync"><i style={{ background: '#8b8bd6' }} />View only</div>
+        : <div className={`auth-sync ${syncState}`}><i />{syncState === 'saving' ? 'Saving' : syncState === 'error' ? 'Sync issue' : 'Synced'}</div>}
       <button onClick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>
     </div>
-  </>
+  </AuthContext.Provider>
 }
 
 function WorkspaceSync({ onState }: { onState: (state: SyncState) => void }) {

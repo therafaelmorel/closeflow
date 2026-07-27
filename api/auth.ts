@@ -81,6 +81,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ user: { id: row.id, name: row.name, email: row.email, role: row.role } })
     }
 
+    if (body.action === 'listUsers') {
+      const session = await getSessionUser(req)
+      if (!session) return res.status(401).json({ error: 'Authentication required', code: 'UNAUTHENTICATED' })
+      if (session.accessRole !== 'owner') return res.status(403).json({ error: 'Only the workspace owner can manage members.' })
+      const members = await db
+        .select({ id: users.id, name: users.name, email: users.email, role: users.role, accessRole: workspaceMembers.accessRole, createdAt: users.createdAt })
+        .from(workspaceMembers)
+        .innerJoin(users, eq(users.id, workspaceMembers.userId))
+        .where(eq(workspaceMembers.workspaceId, session.workspaceId))
+      return res.status(200).json({ members })
+    }
+
+    if (body.action === 'createUser') {
+      const session = await getSessionUser(req)
+      if (!session) return res.status(401).json({ error: 'Authentication required', code: 'UNAUTHENTICATED' })
+      if (session.accessRole !== 'owner') return res.status(403).json({ error: 'Only the workspace owner can add members.' })
+
+      const name = String(body.name || '').trim()
+      const email = normalizeEmail(String(body.email || ''))
+      const role = String(body.role || 'Project Coordinator').trim() || 'Project Coordinator'
+      const accessRole = ['editor', 'viewer'].includes(String(body.accessRole)) ? String(body.accessRole) : 'viewer'
+      const password = String(body.password || '')
+      if (!name || !email.includes('@') || password.length < 8) {
+        return res.status(400).json({ error: 'Enter a name, valid email, and password of at least 8 characters.' })
+      }
+
+      const existing = (await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1))[0]
+      if (existing) return res.status(409).json({ error: 'A user with that email already exists.' })
+
+      const userId = newId()
+      await db.insert(users).values({ id: userId, email, name, role, passwordHash: hashPassword(password) })
+      await db.insert(workspaceMembers).values({ workspaceId: session.workspaceId, userId, accessRole })
+      return res.status(201).json({ user: { id: userId, name, email, role, accessRole } })
+    }
+
     return res.status(400).json({ error: 'Unknown authentication action.' })
   } catch (error) {
     console.error('[api/auth] failed', error)
