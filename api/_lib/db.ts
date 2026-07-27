@@ -51,10 +51,29 @@ async function createSchema() {
   await sql`CREATE INDEX IF NOT EXISTS invoices_workspace_idx ON invoices(workspace_id)`
   await sql`CREATE TABLE IF NOT EXISTS activities (workspace_id text NOT NULL, id text NOT NULL, project_id text NOT NULL, action text NOT NULL, detail text NOT NULL DEFAULT '', occurred_at timestamptz NOT NULL, PRIMARY KEY (workspace_id, id))`
   await sql`CREATE INDEX IF NOT EXISTS activities_workspace_idx ON activities(workspace_id)`
+  await sql`CREATE TABLE IF NOT EXISTS closeflow_meta (key text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`
+}
+
+/**
+ * Earlier builds shipped a sample workspace that the browser synced into Postgres.
+ * Those records use fixed short ids; everything created in the app uses a UUID,
+ * so deleting them by id cannot touch real work. This runs once per database.
+ */
+async function removeSampleData() {
+  const sql = getSql()
+  const marker = await sql`SELECT key FROM closeflow_meta WHERE key = 'sample_data_removed'`
+  if (Array.isArray(marker) && marker.length > 0) return
+  await sql`DELETE FROM activities WHERE project_id IN ('p1','p2','p3','p4','p5') OR id IN ('a1','a2','a3','a4')`
+  await sql`DELETE FROM invoices WHERE project_id IN ('p1','p2','p3','p4','p5') OR id IN ('v1','v2','v3','v4')`
+  await sql`DELETE FROM closeout_items WHERE project_id IN ('p1','p2','p3','p4','p5') OR id IN ('i1','i2','i3','i4','i5','i6','i7','i8')`
+  await sql`DELETE FROM project_budget_category_funds WHERE project_id IN ('p1','p2','p3','p4','p5')`
+  await sql`DELETE FROM project_budget_lines WHERE project_id IN ('p1','p2','p3','p4','p5')`
+  await sql`DELETE FROM projects WHERE id IN ('p1','p2','p3','p4','p5')`
+  await sql`INSERT INTO closeflow_meta (key) VALUES ('sample_data_removed') ON CONFLICT DO NOTHING`
 }
 
 export function ensureSchema() {
-  if (!schemaReady) schemaReady = createSchema().catch((error) => {
+  if (!schemaReady) schemaReady = createSchema().then(removeSampleData).catch((error) => {
     schemaReady = null
     throw error
   })

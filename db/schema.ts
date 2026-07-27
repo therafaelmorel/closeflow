@@ -40,6 +40,11 @@ export const sessions = pgTable('sessions', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('sessions_token_hash_unique').on(table.tokenHash)])
 
+export const closeflowMeta = pgTable('closeflow_meta', {
+  key: text('key').primaryKey(),
+  appliedAt: timestamp('applied_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+})
+
 export const teams = pgTable('teams', {
   workspaceId: text('workspace_id').notNull(),
   id: text('id').notNull(),

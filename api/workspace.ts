@@ -22,6 +22,14 @@ const timestamp = (value: unknown) => Number.isNaN(new Date(text(value)).getTime
 const id = (value: unknown) => text(value) || randomUUID()
 const categoryCode = (value: unknown) => ['0', '1', '2', '3', '4'].includes(text(value)) ? text(value) : '1'
 
+// A browser left open on an older build can still hold the retired sample workspace.
+// Its records use fixed short ids, so they are dropped instead of being written back.
+const sampleProjectIds = new Set(['p1', 'p2', 'p3', 'p4', 'p5'])
+const sampleRecordIds = new Set(['i1', 'i2', 'i3', 'i4', 'i5', 'i6', 'i7', 'i8', 'v1', 'v2', 'v3', 'v4', 'a1', 'a2', 'a3', 'a4'])
+const isSample = (row: Record<string, unknown>) =>
+  sampleProjectIds.has(text(row.id)) || sampleRecordIds.has(text(row.id)) || sampleProjectIds.has(text(row.projectId))
+const live = (rows: Record<string, unknown>[] | undefined) => (rows || []).filter((row) => !isSample(row))
+
 const validateStore = (store: StorePayload) => {
   const groups = [store.projects, store.items, store.invoices, store.activities, store.budgetLines, store.budgetCategoryFunds]
   return groups.every((group) => group === undefined || (Array.isArray(group) && group.length <= 5000))
@@ -71,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await db.delete(projectBudgetLines).where(eq(projectBudgetLines.workspaceId, workspaceId))
     await db.delete(projects).where(eq(projects.workspaceId, workspaceId))
 
-    const projectValues = (store.projects || []).map((row) => ({
+    const projectValues = live(store.projects).map((row) => ({
       workspaceId,
       id: id(row.id),
       name: text(row.name, 'Untitled project'),
@@ -90,7 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       due: date(row.due),
       updated: timestamp(row.updated),
     }))
-    const budgetValues = (store.budgetLines || []).map((row) => ({
+    const budgetValues = live(store.budgetLines).map((row) => ({
       workspaceId,
       id: id(row.id),
       projectId: text(row.projectId),
@@ -103,13 +111,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       spent: number(row.spent),
       notes: text(row.notes),
     }))
-    const categoryFundValues = (store.budgetCategoryFunds || []).map((row) => ({
+    const categoryFundValues = live(store.budgetCategoryFunds).map((row) => ({
       workspaceId,
       projectId: text(row.projectId),
       categoryCode: categoryCode(row.categoryCode),
       funded: Math.max(0, number(row.funded)),
     }))
-    const itemValues = (store.items || []).map((row) => ({
+    const itemValues = live(store.items).map((row) => ({
       workspaceId,
       id: id(row.id),
       projectId: text(row.projectId),
@@ -124,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       notes: text(row.notes),
       followUp: text(row.followUp) ? date(row.followUp) : null,
     }))
-    const invoiceValues = (store.invoices || []).map((row) => ({
+    const invoiceValues = live(store.invoices).map((row) => ({
       workspaceId,
       id: id(row.id),
       projectId: text(row.projectId),
@@ -137,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       disputed: number(row.disputed),
       hold: text(row.hold),
     }))
-    const activityValues = (store.activities || []).map((row) => ({
+    const activityValues = live(store.activities).map((row) => ({
       workspaceId,
       id: id(row.id),
       projectId: text(row.projectId),
