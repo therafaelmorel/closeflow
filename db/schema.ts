@@ -121,6 +121,17 @@ export const projectBudgetCategoryFunds = pgTable('project_budget_category_funds
 }, (table) => [primaryKey({ columns: [table.workspaceId, table.projectId, table.categoryCode] })])
 
 /**
+ * Cost categories a project added itself, plus the standard categories it renamed.
+ * The standard set lives in the app, so only what a project changed is stored here.
+ */
+export const projectBudgetCategories = pgTable('project_budget_categories', {
+  workspaceId: text('workspace_id').notNull(),
+  projectId: text('project_id').notNull(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+}, (table) => [primaryKey({ columns: [table.workspaceId, table.projectId, table.code] })])
+
+/**
  * One row per vendor working on a project. The vendor list itself comes from the
  * budget lines; this table holds what has to be tracked before the project can be
  * closed out: the vendor's purchase order and its closeout letter.

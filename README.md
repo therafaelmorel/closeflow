@@ -44,7 +44,8 @@ Access levels: **Owner** and **Manager** administer teams and workspace access, 
 
 Everything financial belongs to a project, so it is tracked on that project's page rather than on a page of its own.
 
-- **Budget sheet** — assign the approved budget to cost categories and add a line item for each commitment. A line item carries the vendor's name, which is what puts that vendor on the project.
+- **Budget sheet** — assign the approved budget to cost categories and add a line item for each commitment. A line item carries the vendor's name, which is what puts that vendor on the project. Each category is colour-coded so a long sheet reads as separate blocks, and red is kept for the amounts that need attention.
+- **Cost categories** — every project starts with the standard categories (Consulting Fee, Construction, Contingency, FF&E, Hospital Support Fee) and can add its own from the budget sheet, giving each one a code and a name. Any category can be renamed for the project, and a category the project added can be removed along with its line items. Categories belong to the project, so renaming one never changes another project's sheet.
 - **Vendors and closeout letters** — every vendor named on a budget line gets a card with its approved commitment, its purchase order, everything invoiced against it, and the state of its closeout letter. Letters move from Not Requested to Requested, Received, and Accepted, or are marked Not Required; the dates are stamped as the status changes.
 - **Invoices** — invoices live on the project and are billed to one of its vendors. Adding one offers the project's vendors and fills in the purchase order already recorded for the vendor picked.
 

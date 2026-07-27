@@ -1,7 +1,8 @@
-import { useId, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useId, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from 'react'
 import './budget.css'
 
-export type BudgetCategoryCode = '0' | '1' | '2' | '3' | '4'
+/** Category codes are free text so a project can add the categories it needs. */
+export type BudgetCategoryCode = string
 
 export type BudgetLine = {
   id: string
@@ -22,6 +23,15 @@ export type BudgetCategoryFunding = {
   funded: number
 }
 
+/** A category a project added itself, or a renamed standard one. */
+export type BudgetCategory = {
+  projectId: string
+  code: BudgetCategoryCode
+  name: string
+}
+
+type ResolvedCategory = { code: BudgetCategoryCode; name: string; custom: boolean }
+
 type BudgetProject = {
   id: string
   name: string
@@ -33,22 +43,67 @@ type BudgetSheetProps = {
   project: BudgetProject
   lines: BudgetLine[]
   categoryFunds: BudgetCategoryFunding[]
+  /** Categories this project added or renamed, on top of the standard set. */
+  categories?: BudgetCategory[]
   /** Vendors already on this project, offered while naming a new line item. */
   vendorOptions?: string[]
   readOnly?: boolean
   onSaveLine: (line: BudgetLine) => void
   onDeleteLine: (id: string) => void
   onSaveCategoryFunding: (funding: BudgetCategoryFunding) => void
+  onSaveCategory?: (category: BudgetCategory) => void
+  onDeleteCategory?: (code: BudgetCategoryCode) => void
   onUpdateProject: (patch: { budget?: number }) => void
 }
 
-export const budgetCategories: { code: BudgetCategoryCode; name: string }[] = [
+export const defaultBudgetCategories: { code: BudgetCategoryCode; name: string }[] = [
   { code: '0', name: 'Consulting Fee' },
   { code: '1', name: 'Construction' },
   { code: '2', name: 'Contingency' },
   { code: '3', name: 'FF&E' },
   { code: '4', name: 'Hospital Support Fee' },
 ]
+
+const isDefaultCode = (code: BudgetCategoryCode) => defaultBudgetCategories.some(category => category.code === code)
+const byCode = (a: { code: string }, b: { code: string }) => a.code.localeCompare(b.code, 'en', { numeric: true })
+
+/**
+ * The standard categories, renamed where this project renamed them, plus the ones it
+ * added. A code that only survives on a line item or a funded amount — because the
+ * category was removed elsewhere — still gets a block, so no money goes unseen.
+ */
+function projectBudgetCategories(categories: BudgetCategory[], usedCodes: BudgetCategoryCode[]): ResolvedCategory[] {
+  const named = new Map(categories.map(category => [category.code, category.name]))
+  const own = categories.filter(category => !isDefaultCode(category.code)).map(category => ({ code: category.code, name: category.name, custom: true }))
+  const orphans = [...new Set(usedCodes)]
+    .filter(code => !isDefaultCode(code) && !named.has(code))
+    .map(code => ({ code, name: `Category ${code}`, custom: true }))
+  return [
+    ...defaultBudgetCategories.map(category => ({ code: category.code, name: named.get(category.code) || category.name, custom: false })),
+    ...own,
+    ...orphans,
+  ].sort(byCode)
+}
+
+/**
+ * Each category carries its own colour so a long sheet reads as separate blocks
+ * instead of one grey wall. The tones match the status colours used app-wide, and
+ * red is left out of the rotation because it means "over funded" on this sheet.
+ */
+const categoryTones = [
+  { accent: '#315a9f', tint: '#eef3fb', edge: '#cfdcf1' },
+  { accent: '#2d7141', tint: '#edf6f0', edge: '#c8e2d1' },
+  { accent: '#8a6400', tint: '#fdf5e1', edge: '#ebdcaf' },
+  { accent: '#1f6b6b', tint: '#eaf6f5', edge: '#c4e2df' },
+  { accent: '#5a4b9c', tint: '#f1effb', edge: '#d5cdee' },
+  { accent: '#7a3f74', tint: '#f9eff8', edge: '#e6cee3' },
+  { accent: '#8d4d17', tint: '#fbf1e8', edge: '#e9d2bc' },
+  { accent: '#3f5566', tint: '#eef2f5', edge: '#cfdae2' },
+]
+const toneOf = (index: number) => {
+  const tone = categoryTones[index % categoryTones.length]
+  return { '--cat-accent': tone.accent, '--cat-tint': tone.tint, '--cat-edge': tone.edge } as CSSProperties
+}
 
 const money = (value: number) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -60,22 +115,41 @@ const money = (value: number) => new Intl.NumberFormat('en-US', {
 const sum = (lines: BudgetLine[], key: 'committed' | 'spent') => lines.reduce((total, line) => total + Number(line[key] || 0), 0)
 const amountIsOpen = (value: number) => Math.abs(value) > 0.009
 
+/** The lowest whole number not already used as a category code. */
+const nextCategoryCode = (categories: ResolvedCategory[]) => {
+  const used = new Set(categories.map(category => category.code))
+  let next = 0
+  while (used.has(String(next))) next += 1
+  return String(next)
+}
+
 export default function BudgetSheet({
   project,
   lines,
   categoryFunds,
+  categories = [],
   vendorOptions = [],
   readOnly = false,
   onSaveLine,
   onDeleteLine,
   onSaveCategoryFunding,
+  onSaveCategory,
+  onDeleteCategory,
   onUpdateProject,
 }: BudgetSheetProps) {
   const [addingCategory, setAddingCategory] = useState<BudgetCategoryCode | null>(null)
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [editingTotal, setEditingTotal] = useState(false)
   const [totalBudget, setTotalBudget] = useState(String(project.budget || 0))
+  const [categoryDraft, setCategoryDraft] = useState<{ mode: 'add' | 'rename'; code: string; name: string } | null>(null)
+  const [categoryError, setCategoryError] = useState('')
   const vendorListId = useId()
+
+  const visibleCategories = useMemo(
+    () => projectBudgetCategories(categories, [...lines.map(line => line.categoryCode), ...categoryFunds.map(fund => fund.categoryCode)]),
+    [categories, lines, categoryFunds],
+  )
+  const canEditCategories = !readOnly && Boolean(onSaveCategory)
 
   const calculations = useMemo(() => {
     const categoryFunded = categoryFunds.reduce((total, category) => total + Number(category.funded || 0), 0)
@@ -103,6 +177,36 @@ export default function BudgetSheet({
     setEditingTotal(false)
   }
 
+  const openNewCategory = () => {
+    setCategoryError('')
+    setCategoryDraft({ mode: 'add', code: nextCategoryCode(visibleCategories), name: '' })
+  }
+
+  const openRenameCategory = (category: ResolvedCategory) => {
+    setCategoryError('')
+    setCategoryDraft({ mode: 'rename', code: category.code, name: category.name })
+  }
+
+  const saveCategory = (event: FormEvent) => {
+    event.preventDefault()
+    if (!categoryDraft || !onSaveCategory) return
+    const code = categoryDraft.code.trim()
+    const name = categoryDraft.name.trim()
+    if (!code || !name) return setCategoryError('A category needs both a code and a name.')
+    if (categoryDraft.mode === 'add' && visibleCategories.some(category => category.code === code)) {
+      return setCategoryError(`Category ${code} already exists on this project.`)
+    }
+    onSaveCategory({ projectId: project.id, code, name })
+    setCategoryDraft(null)
+  }
+
+  const removeCategory = (category: ResolvedCategory) => {
+    if (!onDeleteCategory) return
+    const count = lines.filter(line => line.categoryCode === category.code).length
+    const detail = count ? ` Its ${count} line item${count === 1 ? '' : 's'} and funded amount will be deleted with it.` : ''
+    if (confirm(`Remove category ${category.code} — ${category.name}?${detail}`)) onDeleteCategory(category.code)
+  }
+
   return <section className="budget-sheet section-gap">
     <div className="budget-heading">
       <div>
@@ -126,8 +230,13 @@ export default function BudgetSheet({
 
     {warnings.length > 0 && <div className="budget-warning"><div><strong>Reconciliation needs attention</strong>{warnings.map(warning => <p key={warning}>{warning}</p>)}</div></div>}
 
+    <div className="budget-categories-head">
+      <div><span className="eyebrow">Cost categories</span><small>{visibleCategories.length} categories · {lines.length} line item{lines.length === 1 ? '' : 's'}</small></div>
+      {canEditCategories && <button className="budget-text-button" onClick={openNewCategory}>+ Add category</button>}
+    </div>
+
     <div className="budget-categories">
-      {budgetCategories.map(category => {
+      {visibleCategories.map((category, index) => {
         const categoryLines = lines.filter(line => line.categoryCode === category.code)
         const legacyFunded = categoryLines.reduce((total, line) => total + Number(line.budget || 0), 0)
         const funded = categoryFunds.find(item => item.categoryCode === category.code)?.funded ?? legacyFunded
@@ -137,12 +246,14 @@ export default function BudgetSheet({
         const categoryAvailable = funded - committed
         const overFunded = categoryAvailable < -0.009
 
-        return <article className={`budget-category ${overFunded ? 'over-funded' : ''}`} key={category.code}>
+        return <article className={`budget-category ${overFunded ? 'over-funded' : ''}`} style={toneOf(index)} key={category.code}>
           <header className="budget-category-header">
             <div className="budget-category-title">
-              <span>Category {category.code}</span>
-              <h3>{category.name}</h3>
-              <small>{categoryLines.length} commitment{categoryLines.length === 1 ? '' : 's'}</small>
+              <span className="budget-category-code" aria-hidden="true">{category.code}</span>
+              <div>
+                <h3>{category.name}</h3>
+                <small>Category {category.code} · {categoryLines.length} commitment{categoryLines.length === 1 ? '' : 's'}{category.custom ? ' · added by this project' : ''}</small>
+              </div>
             </div>
             <div className="budget-category-totals">
               {readOnly
@@ -155,7 +266,13 @@ export default function BudgetSheet({
               <Metric label="Spent" value={money(spent)} />
               <Metric label="Category funds remaining" value={money(categoryAvailable)} danger={categoryAvailable < 0} />
             </div>
-            {!readOnly && <button className="budget-add-line" onClick={() => { setEditingLineId(null); setAddingCategory(category.code) }}>Add line item</button>}
+            {!readOnly && <div className="budget-category-actions">
+              <button className="budget-add-line" onClick={() => { setEditingLineId(null); setAddingCategory(category.code) }}>Add line item</button>
+              {canEditCategories && <div className="budget-category-manage">
+                <button onClick={() => openRenameCategory(category)}>Rename</button>
+                {category.custom && onDeleteCategory && <button className="danger" onClick={() => removeCategory(category)}>Remove</button>}
+              </div>}
+            </div>}
           </header>
 
           {overFunded && <div className="budget-category-alert">Approved commitments exceed this category’s funded amount by {money(Math.abs(categoryAvailable))}.</div>}
@@ -206,6 +323,18 @@ export default function BudgetSheet({
     </div>
 
     {editingTotal && <div className="modal-wrap"><button className="modal-scrim" onClick={() => setEditingTotal(false)} /><div className="modal budget-total-modal"><div className="modal-head"><h2>Edit total project budget</h2><button className="icon" onClick={() => setEditingTotal(false)}>×</button></div><form className="form" onSubmit={saveTotalBudget}><label>Total approved budget<input autoFocus required min="0" step="0.01" type="number" value={totalBudget} onChange={event => setTotalBudget(event.target.value)} /></label><button className="primary full" type="submit">Save total budget</button></form></div></div>}
+
+    {categoryDraft && <div className="modal-wrap"><button className="modal-scrim" onClick={() => setCategoryDraft(null)} /><div className="modal budget-category-modal">
+      <div className="modal-head"><h2>{categoryDraft.mode === 'add' ? 'Add cost category' : 'Rename cost category'}</h2><button className="icon" onClick={() => setCategoryDraft(null)}>×</button></div>
+      <form className="form" onSubmit={saveCategory}>
+        <div className="form-row">
+          <label>Category code<input required disabled={categoryDraft.mode === 'rename'} maxLength={8} value={categoryDraft.code} onChange={event => setCategoryDraft(draft => draft && { ...draft, code: event.target.value })} /></label>
+          <label>Category name<input autoFocus={categoryDraft.mode === 'rename'} required maxLength={80} value={categoryDraft.name} onChange={event => setCategoryDraft(draft => draft && { ...draft, name: event.target.value })} placeholder="e.g. Equipment Rental" /></label>
+        </div>
+        {categoryError && <p className="budget-form-error">{categoryError}</p>}
+        <button className="primary full" type="submit">{categoryDraft.mode === 'add' ? 'Add category' : 'Save category name'}</button>
+      </form>
+    </div></div>}
   </section>
 }
 
@@ -287,5 +416,3 @@ function InlineBudgetRow({ projectId, categoryCode, vendorListId, line, onSave, 
 function MoneyInput({ label, value, setValue, onKeyDown }: { label: string; value: string; setValue: (value: string) => void; onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void }) {
   return <div className="budget-money-input"><b>$</b><input aria-label={label} min="0" step="0.01" type="number" value={value} onChange={event => setValue(event.target.value)} onKeyDown={onKeyDown} placeholder="0" /></div>
 }
-
-void (0 as unknown as ReactNode)

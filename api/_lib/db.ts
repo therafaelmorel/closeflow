@@ -47,6 +47,8 @@ async function createSchema() {
   await sql`CREATE INDEX IF NOT EXISTS project_budget_lines_project_idx ON project_budget_lines(workspace_id, project_id)`
   await sql`CREATE TABLE IF NOT EXISTS project_budget_category_funds (workspace_id text NOT NULL, project_id text NOT NULL, category_code text NOT NULL, funded double precision NOT NULL DEFAULT 0, PRIMARY KEY (workspace_id, project_id, category_code))`
   await sql`CREATE INDEX IF NOT EXISTS project_budget_category_funds_project_idx ON project_budget_category_funds(workspace_id, project_id)`
+  await sql`CREATE TABLE IF NOT EXISTS project_budget_categories (workspace_id text NOT NULL, project_id text NOT NULL, code text NOT NULL, name text NOT NULL, PRIMARY KEY (workspace_id, project_id, code))`
+  await sql`CREATE INDEX IF NOT EXISTS project_budget_categories_project_idx ON project_budget_categories(workspace_id, project_id)`
   await sql`CREATE TABLE IF NOT EXISTS project_vendors (workspace_id text NOT NULL, id text NOT NULL, project_id text NOT NULL, vendor text NOT NULL, po_number text NOT NULL DEFAULT '', po_amount double precision NOT NULL DEFAULT 0, po_date date, letter_status text NOT NULL DEFAULT 'Not Requested', letter_requested date, letter_received date, notes text NOT NULL DEFAULT '', PRIMARY KEY (workspace_id, id))`
   await sql`CREATE INDEX IF NOT EXISTS project_vendors_workspace_idx ON project_vendors(workspace_id)`
   await sql`CREATE INDEX IF NOT EXISTS project_vendors_project_idx ON project_vendors(workspace_id, project_id)`
